@@ -27,6 +27,28 @@ export function isFilesystemRoot(directory: string, path: Path.Path): boolean {
   return path.dirname(directory) === directory;
 }
 
+// A moved T3 home orphans migrated threads' worktrees; recover their old roots from the install's
+// own thread paths. Restricted to the default `<root>/<repo>/<worktree>` shape under a `worktrees`
+// folder, so an attached external folder is never promoted to a managed root.
+export function discoverPreviousWorktreesRoots(input: {
+  readonly worktreePaths: ReadonlyArray<string>;
+  readonly managedRoots: ReadonlyArray<string>;
+  readonly path: Path.Path;
+}): ReadonlyArray<string> {
+  const { path } = input;
+  const managed = new Set(input.managedRoots);
+  const discovered = new Set<string>();
+  for (const worktreePath of input.worktreePaths) {
+    // Trust only normalized absolute paths; a worktree root sits two segments above its worktree.
+    if (!path.isAbsolute(worktreePath) || path.resolve(worktreePath) !== worktreePath) continue;
+    const root = path.dirname(path.dirname(worktreePath));
+    if (path.basename(root) !== "worktrees") continue;
+    if (managed.has(root) || discovered.has(root)) continue;
+    discovered.add(root);
+  }
+  return [...discovered];
+}
+
 export function managedWorktreesDirectories(
   settings: {
     readonly worktreesDirectory: string;
