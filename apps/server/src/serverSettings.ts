@@ -44,7 +44,12 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { linearAutopilotWorkflowIssues } from "@t3tools/shared/linearAutopilotWorkflow";
 import { resolveSymlinkTarget } from "@t3tools/shared/symlink";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ServerConfig from "./config.ts";
+import {
+  discoverPreviousWorktreesRoots,
+  managedWorktreesDirectories,
+} from "./worktreesDirectory.ts";
 import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
 import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
 import {
@@ -670,7 +675,7 @@ function foldLegacyProjectSettings(
 }
 
 const make = Effect.gen(function* () {
-  const { settingsPath } = yield* ServerConfig.ServerConfig;
+  const { settingsPath, worktreesDir } = yield* ServerConfig.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
@@ -915,17 +920,54 @@ const make = Effect.gen(function* () {
     const migrated = settingsFileTrusted
       ? yield* moveInlineSettingsSecrets(sourceControlMigration.settings)
       : folded;
+    // A moved T3 home orphans migrated threads' worktrees; re-register their old roots so the
+    // existing missing-worktree recreation keeps working after a rebrand or base-dir change.
+    const worktreePaths = settingsFileTrusted
+      ? yield* sql<{ readonly worktreePath: string | null }>`
+          SELECT DISTINCT json_extract(payload_json, '$.worktreePath') AS "worktreePath"
+          FROM orchestration_v2_projection_threads
+          WHERE json_extract(payload_json, '$.worktreePath') IS NOT NULL
+            AND json_extract(payload_json, '$.deletedAt') IS NULL
+        `.pipe(
+          NodeSqliteClient.readOnly,
+          Effect.map((rows) =>
+            rows.flatMap((row) => (row.worktreePath === null ? [] : [row.worktreePath])),
+          ),
+          Effect.orElseSucceed(() => [] as ReadonlyArray<string>),
+        )
+      : [];
+    const discoveredWorktreesRoots = discoverPreviousWorktreesRoots({
+      worktreePaths,
+      managedRoots: managedWorktreesDirectories(
+        migrated,
+        worktreesDir,
+        pathService,
+        yield* HostProcess.HomeDirectory,
+      ),
+      path: pathService,
+    });
+    const reconciled =
+      discoveredWorktreesRoots.length === 0
+        ? migrated
+        : {
+            ...migrated,
+            previousWorktreesDirectories: [
+              ...migrated.previousWorktreesDirectories,
+              ...discoveredWorktreesRoots,
+            ],
+          };
     if (
-      migrated !== loaded ||
+      reconciled !== loaded ||
       (settingsFileTrusted && legacyProviders !== undefined) ||
-      hasLegacySourceControl
+      hasLegacySourceControl ||
+      discoveredWorktreesRoots.length > 0
     ) {
-      yield* writeSettingsAtomically(migrated);
+      yield* writeSettingsAtomically(reconciled);
       for (const move of sourceControlMigration.secretMoves) {
         yield* secretStore.remove(move.from).pipe(Effect.ignore);
       }
     }
-    return { settings: migrated, parseFailure };
+    return { settings: reconciled, parseFailure };
   });
 
   const settingsCache = yield* Cache.makeWith((_key: typeof cacheKey) => loadSettingsFromDisk, {

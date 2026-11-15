@@ -135,6 +135,43 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.deepEqual(settings.providerModelPreferences?.[provider]?.modelOrder, ["luna", "sol"]);
     }).pipe(Effect.provide(layerServerSettings())),
   );
+  it.effect(
+    "re-registers a migrated thread's old worktrees root so its worktree stays recoverable",
+    () =>
+      Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        const sql = yield* SqlClient.SqlClient;
+        const oldRoot = "/Users/me/.old-home/worktrees";
+        yield* sql`
+        INSERT INTO orchestration_v2_projection_threads (
+          thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+          created_at, updated_at, payload_json
+        )
+        VALUES (
+          ${"thread-migrated"}, ${"project-1"}, ${"Migrated"}, ${"claudeAgent"},
+          ${"full-access"}, ${"default"}, ${"2026-08-25T00:00:00.000Z"},
+          ${"2026-08-25T00:00:00.000Z"},
+          ${JSON.stringify({ worktreePath: `${oldRoot}/repo-a/t3-1066726f`, deletedAt: null })}
+        )
+      `;
+        // A worktree under the current managed root must not be re-registered.
+        yield* sql`
+        INSERT INTO orchestration_v2_projection_threads (
+          thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+          created_at, updated_at, payload_json
+        )
+        VALUES (
+          ${"thread-current"}, ${"project-1"}, ${"Current"}, ${"claudeAgent"},
+          ${"full-access"}, ${"default"}, ${"2026-08-25T00:00:00.000Z"},
+          ${"2026-08-25T00:00:00.000Z"},
+          ${JSON.stringify({ worktreePath: `${config.worktreesDir}/repo-a/t3-00000001`, deletedAt: null })}
+        )
+      `;
+        const service = yield* ServerSettingsModule.ServerSettingsService;
+        const settings = yield* service.getSettings;
+        assert.deepEqual([...settings.previousWorktreesDirectories], [oldRoot]);
+      }).pipe(Effect.provide(layerServerSettings())),
+  );
   it.effect("persists and broadcasts model preferences to other connected clients", () =>
     Effect.scoped(
       Effect.gen(function* () {
