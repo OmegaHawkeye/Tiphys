@@ -29,21 +29,9 @@ export const isBuiltInWorkflow = (workflow: LinearAutopilotWorkflow) =>
 
 const nodeLimit = 8;
 
-/**
- * A project-owned copy of the built-in graph. Every phase except the protected merge gate gets
- * the project's model so the copy is runnable; the reviewer then needs a different model.
- */
-export function customizeWorkflow(modelSelection: ModelSelection | null): LinearAutopilotWorkflow {
-  return {
-    ...defaultLinearAutopilotWorkflow,
-    id: "custom",
-    label: "Custom workflow",
-    nodes: defaultLinearAutopilotWorkflow.nodes.map((node) =>
-      node.kind === "merge" || modelSelection === null
-        ? node
-        : { ...node, persona: { modelSelection } },
-    ),
-  };
+/** A project-owned copy of the built-in graph, keeping its distinct planner and reviewer models. */
+export function customizeWorkflow(): LinearAutopilotWorkflow {
+  return { ...defaultLinearAutopilotWorkflow, id: "custom", label: "Custom workflow" };
 }
 
 export function updateNode(

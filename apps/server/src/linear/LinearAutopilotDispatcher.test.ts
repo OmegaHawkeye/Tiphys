@@ -21,6 +21,7 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as LinearAutopilotPhaseLaunch from "./LinearAutopilotPhaseLaunch.ts";
 import * as LinearAutopilotDispatcher from "./LinearAutopilotDispatcher.ts";
+import * as LinearAutopilotWorkflow from "./LinearAutopilotWorkflow.ts";
 import * as LinearAutopilotClient from "./LinearAutopilotClient.ts";
 import * as LinearAutopilotRun from "./LinearAutopilotRun.ts";
 import * as TicketSourceFeedback from "../autopilot/TicketSourceFeedback.ts";
@@ -31,6 +32,14 @@ const modelSelection: ModelSelection = {
   instanceId: ProviderInstanceId.make("codex_personal"),
   model: "gpt-6-sol",
 };
+/** Projects without a custom workflow run each phase on the built-in workflow's own model. */
+const defaultPhaseModel = (kind: "plan" | "implement") => {
+  const model = LinearAutopilotWorkflow.defaultWorkflow.nodes.find((node) => node.kind === kind)
+    ?.persona?.modelSelection;
+  if (model === undefined) throw new Error(`The default workflow has no ${kind} model.`);
+  return model;
+};
+
 const project = {
   id: projectId,
   title: "Trusted project",
@@ -237,7 +246,7 @@ it.effect("dispatches only the exact human-approved plan into an implementation 
         runId: run.runId,
         projectId,
         baseRef: "main",
-        modelSelection,
+        modelSelection: defaultPhaseModel("implement"),
         issueIdentifier: "OME-223",
         issueTitle: "Linear autopilot",
         issueDescription: "Implement after approval",
@@ -282,7 +291,7 @@ it.effect("launches planning once from the durable eligible outbox", () => {
         phase: "planning",
         projectId,
         baseRef: "main",
-        modelSelection,
+        modelSelection: defaultPhaseModel("plan"),
         issueIdentifier: "OME-223",
         issueTitle: "Linear autopilot",
         issueDescription: "Implement the plan",

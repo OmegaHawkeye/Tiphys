@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 import { ModelSelection } from "./modelSelection.ts";
+import { ProviderInstanceId } from "./providerInstance.ts";
 
 const WorkflowPersonaInstructions = Schema.Struct({
   personaName: Schema.String.check(Schema.isMinLength(1)).check(Schema.isMaxLength(80)),
@@ -80,6 +81,18 @@ export const LinearAutopilotWorkflowExecution = Schema.Struct({
 });
 export type LinearAutopilotWorkflowExecution = typeof LinearAutopilotWorkflowExecution.Type;
 
+// The reviewer must differ from the planner (no-self-review), so the default pairs two providers.
+const defaultCodexPersona: ModelSelection = {
+  instanceId: ProviderInstanceId.make("codex"),
+  model: "gpt-6-luna",
+  options: [{ id: "reasoningEffort", value: "medium" }],
+};
+const defaultClaudeReviewer: ModelSelection = {
+  instanceId: ProviderInstanceId.make("claudeAgent"),
+  model: "claude-opus-5-5",
+  options: [{ id: "effort", value: "medium" }],
+};
+
 /** The graph equivalent of the native autopilot's plan → review → implement → delivery flow. */
 export const defaultLinearAutopilotWorkflow: LinearAutopilotWorkflow = {
   version: 1,
@@ -87,15 +100,15 @@ export const defaultLinearAutopilotWorkflow: LinearAutopilotWorkflow = {
   label: "Default workflow",
   entry: "plan",
   nodes: [
-    { id: "plan", kind: "plan" },
-    { id: "review", kind: "review" },
-    { id: "implement", kind: "implement" },
+    { id: "plan", kind: "plan", persona: { modelSelection: defaultCodexPersona } },
+    { id: "review", kind: "review", persona: { modelSelection: defaultClaudeReviewer } },
+    { id: "implement", kind: "implement", persona: { modelSelection: defaultCodexPersona } },
     { id: "merge", kind: "merge" },
   ],
   edges: [
     { from: "plan", on: "done", to: "review" },
     { from: "review", on: "approve", to: "implement" },
-    { from: "review", on: "revise", to: "plan", budget: 0 },
+    { from: "review", on: "revise", to: "plan", budget: 2 },
     { from: "implement", on: "done", to: "merge" },
     { from: "implement", on: "verify-fail", to: "implement", budget: 2 },
     { from: "merge", on: "ci-pass", to: "end" },

@@ -455,7 +455,11 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
       const projectId = ProjectId.make("project-workflow");
       const current = (yield* serverSettings.getSettings).linearAutopilot;
-      const valid = { ...defaultLinearAutopilotWorkflow, id: "default-copy" };
+      const valid = {
+        ...defaultLinearAutopilotWorkflow,
+        id: "default-copy",
+        nodes: defaultLinearAutopilotWorkflow.nodes.map(({ id, kind }) => ({ id, kind })),
+      };
       // Custom workflows need explicit personas; the built-in id is the only exemption.
       const saved = yield* serverSettings.updateSettings({
         linearAutopilot: {
