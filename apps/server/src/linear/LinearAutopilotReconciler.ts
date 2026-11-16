@@ -142,6 +142,36 @@ const make = Effect.gen(function* () {
     );
   };
 
+  /** A review that can never start pauses visibly instead of being deferred on every tick. */
+  const blockReview = Effect.fn("LinearAutopilotReconciler.blockReview")(function* (
+    run: LinearAutopilotRuns.LinearAutopilotRun,
+    reason: string,
+  ) {
+    const now = yield* DateTime.now;
+    const transitioned = yield* runs.transition({
+      runId: run.runId,
+      expectedRevision: run.revision,
+      nextState: "paused",
+      updatedAt: now,
+    });
+    if (!transitioned) return;
+    const { attempt } = yield* attempts.begin({
+      runId: run.runId,
+      phase: "review",
+      commandId: `linear-autopilot:${run.runId}:review-blocked:${run.revision}`,
+      startedAt: now,
+    });
+    yield* attempts.recordResult({
+      attemptId: attempt.attemptId,
+      expectedStatus: "pending",
+      status: "failed",
+      finishedAt: now,
+      summary: reason,
+    });
+    const autopilot = (yield* settings.getSettings).linearAutopilot;
+    yield* updateTicketStatus(run, autopilot, "blocked", autopilot.blockedStateId);
+  });
+
   const launchImplementationFollowUp = Effect.fn(
     "LinearAutopilotReconciler.launchImplementationFollowUp",
   )(
@@ -786,29 +816,33 @@ const make = Effect.gen(function* () {
             workflowExecution.nodeId,
           );
           const reviewModel =
-            reviewNode?.kind === "review"
-              ? (reviewNode.persona?.modelSelection ?? currentSettings.reviewGuideModelSelection)
-              : null;
-          if (
-            projectId === null ||
-            baseRef === null ||
-            reviewModel === null ||
-            planAttempt.threadId === null
-          ) {
+            reviewNode?.kind === "review" ? (reviewNode.persona?.modelSelection ?? null) : null;
+          if (projectId === null || baseRef === null || planAttempt.threadId === null) {
             deferred += 1;
             continue;
           }
           const planProjectionResult = yield* threads
             .getThreadProjection(ThreadId.make(planAttempt.threadId))
             .pipe(Effect.result);
+          if (planProjectionResult._tag === "Failure") {
+            deferred += 1;
+            continue;
+          }
+          if (reviewModel === null) {
+            yield* blockReview(
+              run,
+              "No reviewer model: set one on the review step of this project's Autopilot workflow.",
+            );
+            continue;
+          }
+          // No-self-review compares the full identity (instance + model + options).
           if (
-            planProjectionResult._tag === "Failure" ||
-            // No-self-review: the reviewer must not resolve to the planner's
-            // full identity (instance + model + options), not merely a
-            // different provider instance.
             modelSelectionsEqual(planProjectionResult.success.thread.modelSelection, reviewModel)
           ) {
-            deferred += 1;
+            yield* blockReview(
+              run,
+              "The reviewer is the same model as the planner: pick a different review model in this project's Autopilot workflow.",
+            );
             continue;
           }
           const issue = yield* intake.getIssueContext({

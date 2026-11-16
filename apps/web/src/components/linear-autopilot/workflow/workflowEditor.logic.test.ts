@@ -17,22 +17,17 @@ const planner = createModelSelection(ProviderInstanceId.make("claude"), "claude-
 const reviewer = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5");
 
 describe("customizeWorkflow", () => {
-  it("only needs a distinct reviewer model to become runnable", () => {
-    const copy = customizeWorkflow(planner);
-    expect(linearAutopilotWorkflowIssues(copy).map((issue) => issue.message)).toEqual([
-      "planner and reviewer resolve to the same model identity.",
-    ]);
-    const fixed = updateNode(copy, "review", (node) => ({
-      ...node,
-      persona: { modelSelection: reviewer },
-    }));
-    expect(linearAutopilotWorkflowIssues(fixed)).toEqual([]);
+  it("starts runnable with the built-in workflow's distinct planner and reviewer", () => {
+    const copy = customizeWorkflow();
+    expect(copy.id).not.toBe(defaultLinearAutopilotWorkflow.id);
+    expect(copy.nodes).toEqual(defaultLinearAutopilotWorkflow.nodes);
+    expect(linearAutopilotWorkflowIssues(copy)).toEqual([]);
   });
 });
 
 describe("setRoute", () => {
   it("drops a retry budget once the route no longer loops", () => {
-    const base = updateNode(customizeWorkflow(planner), "review", (node) => ({
+    const base = updateNode(customizeWorkflow(), "review", (node) => ({
       ...node,
       persona: { modelSelection: reviewer },
     }));

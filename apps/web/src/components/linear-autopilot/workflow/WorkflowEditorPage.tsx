@@ -257,7 +257,7 @@ function ProjectWorkflowEditor({
             <Button
               variant="outline"
               disabled={writeBlocked}
-              onClick={() => replace(customizeWorkflow(projectModel))}
+              onClick={() => replace(customizeWorkflow())}
             >
               <CopyIcon aria-hidden /> Customize
             </Button>

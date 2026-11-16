@@ -25,10 +25,6 @@ const plannerModel: ModelSelection = {
   instanceId: ProviderInstanceId.make("codex_personal"),
   model: "gpt-6-sol",
 };
-const reviewerModel: ModelSelection = {
-  instanceId: ProviderInstanceId.make("claude_work"),
-  model: "claude-sonnet-4-5",
-};
 
 const harness = (
   options: {
@@ -36,7 +32,6 @@ const harness = (
     readonly projection?: unknown;
     readonly pullRequestSummary?: unknown;
     readonly pullRequestChecks?: unknown;
-    readonly reviewGuideModelSelection?: ModelSelection;
   } = {},
 ) => {
   const reviewLaunches: Array<LinearAutopilotPhaseLaunch.LinearAutopilotReadOnlyLaunchInput> = [];
@@ -54,7 +49,8 @@ const harness = (
       TicketSourceFeedback.TicketSourceFeedback.of({ update: () => Effect.void }),
     ),
     ServerSettings.ServerSettingsService.layerTest({
-      reviewGuideModelSelection: options.reviewGuideModelSelection ?? reviewerModel,
+      // Autopilot must never borrow the source-control review guide model.
+      reviewGuideModelSelection: plannerModel,
       linearAutopilot: {
         teamId: "team-1",
         needsHumanApprovalStateId: "approval-state-1",
@@ -142,6 +138,24 @@ const harness = (
     followUps,
   };
 };
+
+const defaultReviewerModel = LinearAutopilotWorkflow.defaultWorkflow.nodes.find(
+  (node) => node.kind === "review",
+)?.persona?.modelSelection;
+
+const workflowWithReviewer = (reviewer: ModelSelection | null) =>
+  LinearAutopilotWorkflow.encodeLinearAutopilotWorkflowExecution(
+    LinearAutopilotWorkflow.startLinearAutopilotWorkflow({
+      ...LinearAutopilotWorkflow.defaultWorkflow,
+      nodes: LinearAutopilotWorkflow.defaultWorkflow.nodes.map((node) =>
+        node.kind !== "review"
+          ? node
+          : reviewer === null
+            ? { id: node.id, kind: node.kind }
+            : { ...node, persona: { modelSelection: reviewer } },
+      ),
+    }),
+  );
 
 const seedRun = (
   state: "planning" | "reviewing" | "implementing" | "verifying" | "delivering",
@@ -292,18 +306,14 @@ it.effect("records a completed plan and launches an independent read-only review
   return Effect.gen(function* () {
     const runId = yield* seedRun("planning");
     yield* seedRunningAttempt(runId, "planning");
-    const configured = yield* ServerSettings.ServerSettingsService;
-    assert.equal(
-      (yield* configured.getSettings).reviewGuideModelSelection?.instanceId,
-      reviewerModel.instanceId,
-    );
 
     const reconciler = yield* LinearAutopilotReconciler.LinearAutopilotReconciler;
     const result = yield* reconciler.reconcile();
     assert.equal(result.phasesCompleted, 1);
     assert.equal(result.reviewsLaunched, 1, JSON.stringify(result));
     assert.equal(setup.reviewLaunches[0]?.phase, "review");
-    assert.equal(setup.reviewLaunches[0]?.modelSelection.instanceId, reviewerModel.instanceId);
+    assert.isDefined(defaultReviewerModel);
+    assert.deepStrictEqual(setup.reviewLaunches[0]?.modelSelection, defaultReviewerModel);
     assert.equal(setup.reviewLaunches[0]?.reviewContext, "Implementation plan");
     const attempts = yield* LinearAutopilotPhaseAttempts.LinearAutopilotPhaseAttemptRepository;
     assert.equal(
@@ -320,12 +330,9 @@ it.effect(
       instanceId: plannerModel.instanceId,
       model: "gpt-6-sol-mini",
     };
-    const setup = harness({
-      completePlanning: true,
-      reviewGuideModelSelection: sameInstanceReviewer,
-    });
+    const setup = harness({ completePlanning: true });
     return Effect.gen(function* () {
-      const runId = yield* seedRun("planning");
+      const runId = yield* seedRun("planning", workflowWithReviewer(sameInstanceReviewer));
       yield* seedRunningAttempt(runId, "planning");
       const reconciler = yield* LinearAutopilotReconciler.LinearAutopilotReconciler;
       const result = yield* reconciler.reconcile();
@@ -337,6 +344,31 @@ it.effect(
     }).pipe(Effect.provide(setup.layer));
   },
 );
+
+it.effect.each([
+  { name: "has no reviewer model", reviewer: null, reason: "No reviewer model" },
+  { name: "would review its own plan", reviewer: plannerModel, reason: "same model" },
+])("pauses and blocks a run whose workflow $name", (blocked) => {
+  const setup = harness({ completePlanning: true });
+  return Effect.gen(function* () {
+    const runId = yield* seedRun("planning", workflowWithReviewer(blocked.reviewer));
+    yield* seedRunningAttempt(runId, "planning");
+
+    const reconciler = yield* LinearAutopilotReconciler.LinearAutopilotReconciler;
+    const result = yield* reconciler.reconcile();
+
+    assert.equal(result.reviewsLaunched, 0);
+    const run = yield* (yield* LinearAutopilotRuns.LinearAutopilotRunRepository).getById(runId);
+    assert.equal(run?.state, "paused");
+    assert.deepStrictEqual(setup.linearUpdates, [
+      { issueId: "issue-1", stateId: "blocked-state-1" },
+    ]);
+    const attempts = yield* LinearAutopilotPhaseAttempts.LinearAutopilotPhaseAttemptRepository;
+    const review = yield* attempts.getLatest({ runId, phase: "review" });
+    assert.equal(review?.status, "failed");
+    assert.include(review?.summary ?? "", blocked.reason);
+  }).pipe(Effect.provide(setup.layer));
+});
 
 it.effect("sends only an explicit approve verdict to the exact human approval gate", () => {
   const setup = harness();
@@ -372,15 +404,9 @@ it.effect("sends only an explicit approve verdict to the exact human approval ga
   }).pipe(Effect.provide(setup.layer));
 });
 
-it.effect("takes a bounded revise edge and launches a fresh planning attempt", () => {
-  const workflow = {
-    ...LinearAutopilotWorkflow.defaultWorkflow,
-    edges: LinearAutopilotWorkflow.defaultWorkflow.edges.map((edge) =>
-      edge.from === "review" && edge.on === "revise" ? { ...edge, budget: 1 } : edge,
-    ),
-  };
+it.effect("takes the default workflow's revise edge and launches a fresh planning attempt", () => {
   const execution = LinearAutopilotWorkflow.advanceLinearAutopilotWorkflow(
-    LinearAutopilotWorkflow.startLinearAutopilotWorkflow(workflow),
+    LinearAutopilotWorkflow.startLinearAutopilotWorkflow(LinearAutopilotWorkflow.defaultWorkflow),
     "done",
   ).state;
   const setup = harness({
