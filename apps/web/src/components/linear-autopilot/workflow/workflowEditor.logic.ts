@@ -201,3 +201,64 @@ export function instructionsRevision(text: string): string {
   }
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
+
+/** The parts of a provider instance that decide whether a phase can run on it. */
+export interface WorkflowProviderStatus {
+  readonly instanceId: string;
+  readonly displayName: string;
+  readonly enabled: boolean;
+  readonly isAvailable: boolean;
+}
+
+export interface WorkflowModelWarning {
+  readonly nodeId: string;
+  readonly message: string;
+}
+
+/**
+ * Phases whose model runs on a provider this environment cannot use. Saving stays allowed,
+ * since a provider can be turned back on, but runs would stop at these phases.
+ */
+export function unusableModelWarnings(
+  workflow: LinearAutopilotWorkflow,
+  providers: ReadonlyArray<WorkflowProviderStatus>,
+): WorkflowModelWarning[] {
+  // No providers means they have not loaded yet, not that every phase is broken.
+  if (providers.length === 0) return [];
+  const warnings: WorkflowModelWarning[] = [];
+  for (const node of workflow.nodes) {
+    if (node.persona === undefined) continue;
+    const { instanceId } = node.persona.modelSelection;
+    const provider = providers.find((candidate) => candidate.instanceId === instanceId);
+    const phase = PHASE_LABEL[node.kind];
+    if (provider === undefined) {
+      warnings.push({
+        nodeId: node.id,
+        message: `${phase} runs on provider "${instanceId}", which is not set up in this environment.`,
+      });
+    } else if (!provider.enabled) {
+      warnings.push({
+        nodeId: node.id,
+        message: `${phase} runs on ${provider.displayName}, which is turned off in this environment.`,
+      });
+    } else if (!provider.isAvailable) {
+      warnings.push({
+        nodeId: node.id,
+        message: `${phase} runs on ${provider.displayName}, which is not available right now.`,
+      });
+    }
+  }
+  return warnings;
+}
+
+/**
+ * What to persist for a scope: null when the workflow is what the scope inherits anyway, so it
+ * keeps following later changes to the default. Settings round-trip through JSON, so structural
+ * equality is what "the same" means here.
+ */
+export function workflowToStore(
+  workflow: LinearAutopilotWorkflow,
+  inherited: LinearAutopilotWorkflow,
+): LinearAutopilotWorkflow | null {
+  return JSON.stringify(workflow) === JSON.stringify(inherited) ? null : workflow;
+}

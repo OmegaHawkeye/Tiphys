@@ -142,19 +142,31 @@ const make = Effect.gen(function* () {
     );
   };
 
+  /** Stops a run for a human, records why, and moves the ticket to Blocked. */
+  const pauseRun = Effect.fn("LinearAutopilotReconciler.pauseRun")(function* (
+    run: LinearAutopilotRuns.LinearAutopilotRun,
+    reason: string,
+  ) {
+    const transitioned = yield* runs.transition({
+      runId: run.runId,
+      expectedRevision: run.revision,
+      nextState: "paused",
+      updatedAt: yield* DateTime.now,
+      stopReason: reason,
+    });
+    if (!transitioned) return false;
+    const autopilot = (yield* settings.getSettings).linearAutopilot;
+    yield* updateTicketStatus(run, autopilot, "blocked", autopilot.blockedStateId);
+    return true;
+  });
+
   /** A review that can never start pauses visibly instead of being deferred on every tick. */
   const blockReview = Effect.fn("LinearAutopilotReconciler.blockReview")(function* (
     run: LinearAutopilotRuns.LinearAutopilotRun,
     reason: string,
   ) {
+    if (!(yield* pauseRun(run, reason))) return;
     const now = yield* DateTime.now;
-    const transitioned = yield* runs.transition({
-      runId: run.runId,
-      expectedRevision: run.revision,
-      nextState: "paused",
-      updatedAt: now,
-    });
-    if (!transitioned) return;
     const { attempt } = yield* attempts.begin({
       runId: run.runId,
       phase: "review",
@@ -168,8 +180,6 @@ const make = Effect.gen(function* () {
       finishedAt: now,
       summary: reason,
     });
-    const autopilot = (yield* settings.getSettings).linearAutopilot;
-    yield* updateTicketStatus(run, autopilot, "blocked", autopilot.blockedStateId);
   });
 
   const launchImplementationFollowUp = Effect.fn(
@@ -395,14 +405,10 @@ const make = Effect.gen(function* () {
               if (!launched) deferred += 1;
               continue;
             } else {
-              yield* runs.transition({
-                runId: run.runId,
-                expectedRevision: run.revision,
-                nextState: "paused",
-                updatedAt: yield* DateTime.now,
-              });
-              const autopilot = currentSettings.linearAutopilot;
-              yield* updateTicketStatus(run, autopilot, "blocked", autopilot.blockedStateId);
+              yield* pauseRun(
+                run,
+                `The ${phase} agent stopped with status ${projectionRun.status}. Open its thread to see why.`,
+              );
               continue;
             }
           }
@@ -474,15 +480,10 @@ const make = Effect.gen(function* () {
               continue;
             }
             if (repair?.status === "failed") {
-              const transitioned = yield* runs.transition({
-                runId: run.runId,
-                expectedRevision: run.revision,
-                nextState: "paused",
-                updatedAt: yield* DateTime.now,
-              });
-              const autopilot = currentSettings.linearAutopilot;
-              if (transitioned)
-                yield* updateTicketStatus(run, autopilot, "blocked", autopilot.blockedStateId);
+              yield* pauseRun(
+                run,
+                "Repair after a failed verification did not succeed. Open the repair thread to see why.",
+              );
               continue;
             }
             const workflowExecution = yield* LinearAutopilotWorkflow.effect(() =>
@@ -499,15 +500,10 @@ const make = Effect.gen(function* () {
                 ? LinearAutopilotWorkflow.workflowNode(retry.state.definition, retry.state.nodeId)
                 : undefined;
             if (retry._tag !== "advanced" || retryNode?.kind !== "implement") {
-              const transitioned = yield* runs.transition({
-                runId: run.runId,
-                expectedRevision: run.revision,
-                nextState: "paused",
-                updatedAt: yield* DateTime.now,
-              });
-              const autopilot = currentSettings.linearAutopilot;
-              if (transitioned)
-                yield* updateTicketStatus(run, autopilot, "blocked", autopilot.blockedStateId);
+              yield* pauseRun(
+                run,
+                "Verification kept failing and the workflow's implement retry budget is used up.",
+              );
               continue;
             }
             const checkpointed = yield* runs.checkpointWorkflow({
@@ -584,15 +580,7 @@ const make = Effect.gen(function* () {
             projection.success.thread.linkedPullRequest ??
             null;
           if (pullRequest === null || run.projectId === null) {
-            const transitioned = yield* runs.transition({
-              runId: run.runId,
-              expectedRevision: run.revision,
-              nextState: "paused",
-              updatedAt: yield* DateTime.now,
-            });
-            const autopilot = currentSettings.linearAutopilot;
-            if (transitioned)
-              yield* updateTicketStatus(run, autopilot, "blocked", autopilot.blockedStateId);
+            yield* pauseRun(run, "Delivery finished without a linked pull request.");
             continue;
           }
           const reference = pullRequestRef({ ...pullRequest, projectId: run.projectId });
@@ -615,15 +603,10 @@ const make = Effect.gen(function* () {
             continue;
           }
           if (pullRequestSummary.state !== "open") {
-            const transitioned = yield* runs.transition({
-              runId: run.runId,
-              expectedRevision: run.revision,
-              nextState: "paused",
-              updatedAt: yield* DateTime.now,
-            });
-            const autopilot = currentSettings.linearAutopilot;
-            if (transitioned)
-              yield* updateTicketStatus(run, autopilot, "blocked", autopilot.blockedStateId);
+            yield* pauseRun(
+              run,
+              `Pull request ${pullRequest.url} is ${pullRequestSummary.state}, so delivery cannot continue.`,
+            );
             continue;
           }
           let workflowExecution = yield* LinearAutopilotWorkflow.effect(() =>
@@ -712,15 +695,10 @@ const make = Effect.gen(function* () {
               }
             }
             if (pullRequestSummary.checksState === "failing") {
-              const transitioned = yield* runs.transition({
-                runId: run.runId,
-                expectedRevision: run.revision,
-                nextState: "paused",
-                updatedAt: yield* DateTime.now,
-              });
-              const autopilot = currentSettings.linearAutopilot;
-              if (transitioned)
-                yield* updateTicketStatus(run, autopilot, "blocked", autopilot.blockedStateId);
+              yield* pauseRun(
+                run,
+                "CI checks are failing and the workflow's CI repair budget is used up.",
+              );
               continue;
             }
             deferred += 1;
@@ -878,7 +856,10 @@ const make = Effect.gen(function* () {
         }
         const verdict = /^VERDICT:\s*(APPROVE|REVISE)\b/imu.exec(reviewAttempt.summary)?.[1];
         if (verdict === undefined) {
-          deferred += 1;
+          yield* pauseRun(
+            run,
+            "The review did not include a VERDICT: APPROVE or VERDICT: REVISE line. Open the review thread, then restart from plan.",
+          );
           continue;
         }
         if (verdict === "REVISE") {
@@ -979,9 +960,15 @@ const make = Effect.gen(function* () {
           needsHumanApprovalStateId: settingsForLinear.needsHumanApprovalStateId,
           reviewedAt: yield* DateTime.now,
           reviewerApproved: verdict === "APPROVE",
+          rejectionReason:
+            "The reviewer asked for changes again and the workflow's revise budget is used up. Read the review, update the ticket if needed, then restart from plan.",
         });
         if (result === "needs_approval") approvalsRequested += 1;
         else if (result === "stale") deferred += 1;
+        else {
+          const autopilot = currentSettings.linearAutopilot;
+          yield* updateTicketStatus(run, autopilot, "blocked", autopilot.blockedStateId);
+        }
       }
 
       return {

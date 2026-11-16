@@ -33,7 +33,11 @@ import {
   useUpdateScopedSettings,
 } from "../../settings/useScopedSettings";
 import { WorkflowCanvas, type WorkflowSelection } from "./WorkflowCanvas";
-import { useWorkflowModelName, WorkflowPersonaModelPicker } from "./WorkflowPersonaModelPicker";
+import {
+  useWorkflowModelName,
+  useWorkflowProviderStatuses,
+  WorkflowPersonaModelPicker,
+} from "./WorkflowPersonaModelPicker";
 import { useProjectRuns, WorkflowRunDetails, WorkflowRunList } from "./WorkflowRuns";
 import {
   addNode,
@@ -52,7 +56,9 @@ import {
   routeTargets,
   setRoute,
   setRouteBudget,
+  unusableModelWarnings,
   updateNode,
+  workflowToStore,
 } from "./workflowEditor.logic";
 
 const BUDGET_OPTIONS = [0, 1, 2, 3, 5, 10];
@@ -70,13 +76,17 @@ function phaseSubtitle(
 }
 const selectClass = "h-8 rounded-md border border-input bg-background px-2 text-sm";
 
+/** The workflow every project without its own uses; edited like a project's. */
+const DEFAULT_SCOPE = "default";
+type WorkflowScope = ProjectId | typeof DEFAULT_SCOPE;
+
 export function WorkflowEditorPage() {
   const settings = useScopedSettings();
   const writeAllowed = useScopedSettingsWriteAllowed();
   const updateSettings = useUpdateScopedSettings();
   const [projects, setProjects] = useState<ProjectSnapshot["projects"] | null>(null);
   const [projectsFailed, setProjectsFailed] = useState(false);
-  const [projectId, setProjectId] = useState<ProjectId | null>(null);
+  const [scope, setScope] = useState<WorkflowScope | null>(null);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- loads the project list from the server once on mount.
   useEffect(() => {
@@ -107,7 +117,16 @@ export function WorkflowEditorPage() {
   const sortedProjects = [...(projects ?? [])].sort(
     (a, b) => Number(mappedProjectIds.has(b.id)) - Number(mappedProjectIds.has(a.id)),
   );
-  const selectedProjectId = projectId ?? sortedProjects[0]?.id ?? null;
+  const selectedScope: WorkflowScope = scope ?? sortedProjects[0]?.id ?? DEFAULT_SCOPE;
+  const { workflows, defaultWorkflow } = settings.linearAutopilot;
+  const configuredDefault = defaultWorkflow ?? defaultLinearAutopilotWorkflow;
+  // A project inherits the configured default; the default scope inherits the built-in.
+  const inherited =
+    selectedScope === DEFAULT_SCOPE ? defaultLinearAutopilotWorkflow : configuredDefault;
+  const saved =
+    selectedScope === DEFAULT_SCOPE
+      ? configuredDefault
+      : (workflows[selectedScope] ?? configuredDefault);
 
   return (
     <SettingsPageContainer width="wide" className="gap-4">
@@ -129,32 +148,42 @@ export function WorkflowEditorPage() {
         <p role="status" className="text-sm text-muted-foreground">
           Loading projects…
         </p>
-      ) : selectedProjectId === null ? (
-        <p className="text-sm text-muted-foreground">Add a T3 project to give it a workflow.</p>
       ) : (
         <ProjectWorkflowEditor
-          key={selectedProjectId}
-          projectId={selectedProjectId}
+          key={selectedScope}
+          scope={selectedScope}
           projects={sortedProjects}
           mappedProjectIds={mappedProjectIds}
-          onProjectChange={setProjectId}
-          saved={
-            settings.linearAutopilot.workflows[selectedProjectId] ?? defaultLinearAutopilotWorkflow
+          onScopeChange={setScope}
+          saved={saved}
+          inherited={inherited}
+          inheritsDefault={
+            selectedScope !== DEFAULT_SCOPE &&
+            workflows[selectedScope] === undefined &&
+            defaultWorkflow !== undefined
           }
           projectModel={
-            sortedProjects.find((project) => project.id === selectedProjectId)
-              ?.defaultModelSelection ?? settings.defaultModelSelection
+            (selectedScope === DEFAULT_SCOPE
+              ? undefined
+              : sortedProjects.find((project) => project.id === selectedScope)
+                  ?.defaultModelSelection) ?? settings.defaultModelSelection
           }
           readOnly={!writeAllowed}
           onSave={(workflow) => {
-            const others = Record.remove(settings.linearAutopilot.workflows, selectedProjectId);
+            const stored = workflowToStore(workflow, inherited);
+            if (selectedScope === DEFAULT_SCOPE) {
+              const { defaultWorkflow: _previous, ...rest } = settings.linearAutopilot;
+              updateSettings({
+                linearAutopilot: stored === null ? rest : { ...rest, defaultWorkflow: stored },
+              });
+              return;
+            }
+            const others = Record.remove(workflows, selectedScope);
             updateSettings({
               linearAutopilot: {
                 ...settings.linearAutopilot,
-                // Absent means the built-in workflow, so saving it back stores nothing.
-                workflows: isBuiltInWorkflow(workflow)
-                  ? others
-                  : { ...others, [selectedProjectId]: workflow },
+                // Absent means the inherited workflow, so saving it back stores nothing.
+                workflows: stored === null ? others : { ...others, [selectedScope]: stored },
               },
             });
           }}
@@ -165,20 +194,26 @@ export function WorkflowEditorPage() {
 }
 
 function ProjectWorkflowEditor({
-  projectId,
+  scope,
   projects,
   mappedProjectIds,
-  onProjectChange,
+  onScopeChange,
   saved,
+  inherited,
+  inheritsDefault,
   projectModel,
   readOnly: writeBlocked,
   onSave,
 }: {
-  readonly projectId: ProjectId;
+  readonly scope: WorkflowScope;
   readonly projects: ProjectSnapshot["projects"];
   readonly mappedProjectIds: ReadonlySet<string>;
-  readonly onProjectChange: (projectId: ProjectId) => void;
+  readonly onScopeChange: (scope: WorkflowScope) => void;
   readonly saved: LinearAutopilotWorkflow;
+  /** What this scope runs when it stores nothing: the configured default, or the built-in. */
+  readonly inherited: LinearAutopilotWorkflow;
+  /** The project has no workflow of its own and follows a configured default. */
+  readonly inheritsDefault: boolean;
   readonly projectModel: ModelSelection | null;
   readonly readOnly: boolean;
   readonly onSave: (workflow: LinearAutopilotWorkflow) => void;
@@ -198,6 +233,9 @@ function ProjectWorkflowEditor({
   const dirty = draft !== null && JSON.stringify(draft) !== savedJson;
   const conflict = dirty && draftBase !== null && draftBase !== savedJson;
   const issues = linearAutopilotWorkflowIssues(workflow);
+  const projectId = scope === DEFAULT_SCOPE ? null : scope;
+  const modelWarnings = unusableModelWarnings(workflow, useWorkflowProviderStatuses(projectId));
+  const inheritedIsBuiltIn = isBuiltInWorkflow(inherited);
   const modelName = useWorkflowModelName();
   const edit = (next: LinearAutopilotWorkflow) => {
     if (draft === null) setDraftBase(savedJson);
@@ -223,9 +261,16 @@ function ProjectWorkflowEditor({
         <select
           aria-label="Project"
           className={cn(selectClass, "w-64")}
-          value={projectId}
-          onChange={(event) => onProjectChange(ProjectId.make(event.target.value))}
+          value={scope}
+          onChange={(event) =>
+            onScopeChange(
+              event.target.value === DEFAULT_SCOPE
+                ? DEFAULT_SCOPE
+                : ProjectId.make(event.target.value),
+            )
+          }
         >
+          <option value={DEFAULT_SCOPE}>Default for all projects</option>
           {projects.map((project) => (
             <option key={project.id} value={project.id}>
               {project.title}
@@ -235,6 +280,7 @@ function ProjectWorkflowEditor({
         </select>
         <ToggleGroup
           aria-label="View"
+          className={cn(projectId === null && "hidden")}
           value={[mode]}
           onValueChange={(next) => {
             const value = next[0];
@@ -247,6 +293,11 @@ function ProjectWorkflowEditor({
         <Badge size="control" variant={builtIn ? "outline" : "info"}>
           {builtIn ? "Built-in workflow" : workflow.label}
         </Badge>
+        {inheritsDefault && !dirty ? (
+          <Badge size="control" variant="outline">
+            Uses the default workflow
+          </Badge>
+        ) : null}
         {dirty ? (
           <Badge size="control" variant="warning">
             Unsaved changes
@@ -270,6 +321,11 @@ function ProjectWorkflowEditor({
               Reset to built-in
             </Button>
           )}
+          {projectId !== null && !inheritedIsBuiltIn && !inheritsDefault ? (
+            <Button variant="ghost" disabled={writeBlocked} onClick={() => replace(inherited)}>
+              Use default workflow
+            </Button>
+          ) : null}
           <Button
             variant="ghost"
             disabled={!dirty}
@@ -291,7 +347,7 @@ function ProjectWorkflowEditor({
           </Button>
         </div>
       </div>
-      {mode === "runs" ? (
+      {mode === "runs" && projectId !== null ? (
         <ProjectRunsView projectId={projectId} modelName={modelName} />
       ) : (
         <>
@@ -317,10 +373,31 @@ function ProjectWorkflowEditor({
               </AlertAction>
             </Alert>
           ) : null}
+          {modelWarnings.length > 0 ? (
+            <Alert variant="warning">
+              <AlertTriangleIcon />
+              <AlertTitle>Some phases cannot run in this environment</AlertTitle>
+              <AlertDescription>
+                <ul className="list-disc pl-4">
+                  {modelWarnings.map((warning) => (
+                    <li key={warning.nodeId}>{warning.message}</li>
+                  ))}
+                </ul>
+                Runs stop at these phases until the provider is turned on or the phase uses another
+                model.
+              </AlertDescription>
+            </Alert>
+          ) : null}
           <p className="text-sm text-muted-foreground">
-            {builtIn
-              ? "Runs in this project use the built-in plan → review → implement → merge workflow. Customize it to choose personas, retry budgets, and alternate phases."
-              : "Saved changes apply to new runs. Runs already in progress keep the workflow they started with."}
+            {projectId === null
+              ? builtIn
+                ? "Projects without a workflow of their own use the built-in plan → review → implement → merge workflow. Customize it to change the models and retry budgets for all of them at once."
+                : "Projects without a workflow of their own use this workflow. Saved changes apply to their new runs."
+              : builtIn
+                ? "Runs in this project use the built-in plan → review → implement → merge workflow. Customize it to choose personas, retry budgets, and alternate phases."
+                : inheritsDefault
+                  ? "This project uses the default workflow. Saving changes here gives it a copy of its own."
+                  : "Saved changes apply to new runs. Runs already in progress keep the workflow they started with."}
             {writeBlocked
               ? " This environment needs settings write permission to change workflows."
               : ""}
@@ -328,7 +405,7 @@ function ProjectWorkflowEditor({
 
           <div className="relative">
             <WorkflowCanvas
-              key={`${projectId}:${canvasKey}`}
+              key={`${scope}:${canvasKey}`}
               workflow={workflow}
               issues={issues}
               readOnly={!editable}

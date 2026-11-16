@@ -24,6 +24,12 @@ export interface LinearAutopilotApprovalRequest {
   readonly reviewedAt: DateTime.Utc;
 }
 
+export interface LinearAutopilotReviewedPlan extends LinearAutopilotApprovalRequest {
+  readonly reviewerApproved: boolean;
+  /** Shown to operators when a rejected review pauses the run. */
+  readonly rejectionReason?: string;
+}
+
 export interface LinearAutopilotHumanApproval {
   readonly runId: string;
   readonly expectedRevision: number;
@@ -40,7 +46,7 @@ export class LinearAutopilotApproval extends Context.Service<
   {
     /** Persists the exact reviewed plan before moving the Linear issue to its configured gate. */
     readonly requestHumanApproval: (
-      input: LinearAutopilotApprovalRequest & { readonly reviewerApproved: boolean },
+      input: LinearAutopilotReviewedPlan,
     ) => Effect.Effect<
       "needs_approval" | "review_rejected" | "stale",
       | PersistenceErrors.PersistenceSqlError
@@ -71,6 +77,7 @@ const make = Effect.gen(function* () {
             expectedRevision: input.expectedRevision,
             nextState: "paused",
             updatedAt: input.reviewedAt,
+            stopReason: input.rejectionReason ?? "The reviewer did not approve the plan.",
           });
           return paused ? "review_rejected" : "stale";
         }

@@ -840,6 +840,22 @@ describe("linear autopilot maps", () => {
     expect(patched.linearAutopilot.githubIssueProjectMappings).toEqual({});
     expect(patched.linearAutopilot.workflows).toEqual({});
   });
+
+  it("clears the default workflow when the whole autopilot patch leaves it out", () => {
+    const custom = { ...defaultLinearAutopilotWorkflow, id: "team-default" };
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      linearAutopilot: { ...DEFAULT_SERVER_SETTINGS.linearAutopilot, defaultWorkflow: custom },
+    };
+    const { defaultWorkflow: _cleared, ...withoutDefault } = current.linearAutopilot;
+    expect(
+      applyServerSettingsPatch(current, { linearAutopilot: withoutDefault }).linearAutopilot,
+    ).not.toHaveProperty("defaultWorkflow");
+    expect(
+      applyServerSettingsPatch(current, { linearAutopilot: current.linearAutopilot })
+        .linearAutopilot.defaultWorkflow,
+    ).toEqual(custom);
+  });
 });
 
 describe("worktreesDirectory", () => {

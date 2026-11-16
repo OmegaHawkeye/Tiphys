@@ -1,9 +1,11 @@
 import {
   defaultLinearAutopilotWorkflow,
+  type LinearAutopilotSettings,
   type LinearAutopilotWorkflow,
   type LinearAutopilotWorkflowEdge,
   type LinearAutopilotWorkflowNodeKind,
   type LinearAutopilotWorkflowOutcome,
+  type ProjectId,
 } from "@t3tools/contracts";
 
 import { modelSelectionsEqual } from "./model.ts";
@@ -38,6 +40,15 @@ export function linearAutopilotRouteTargetKind(
   if (kind === "merge" && outcome === "ci-fail") return "implement";
   return null;
 }
+
+/** The workflow a project's new runs use: its own, else the configured default, else the built-in. */
+export const resolveLinearAutopilotWorkflow = (
+  settings: Pick<LinearAutopilotSettings, "workflows" | "defaultWorkflow">,
+  projectId: ProjectId | null,
+): LinearAutopilotWorkflow =>
+  (projectId === null ? undefined : settings.workflows[projectId]) ??
+  settings.defaultWorkflow ??
+  defaultLinearAutopilotWorkflow;
 
 export interface LinearAutopilotWorkflowIssue {
   readonly message: string;

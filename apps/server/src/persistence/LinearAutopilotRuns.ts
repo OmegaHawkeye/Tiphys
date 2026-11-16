@@ -35,6 +35,8 @@ export const LinearAutopilotRun = Schema.Struct({
   approvalBaseRef: Schema.NullOr(Schema.String),
   baseRef: Schema.NullOr(Schema.String),
   workflowJson: Schema.NullOr(Schema.String),
+  /** Why the run paused, failed, or was cancelled; null while it is active or delivered. */
+  stopReason: Schema.NullOr(Schema.String),
   approvedBy: Schema.NullOr(Schema.String),
   approvedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   createdAt: Schema.DateTimeUtcFromString,
@@ -80,6 +82,8 @@ const TransitionRequest = Schema.Struct({
   approvalBaseRef: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(255)))),
   baseRef: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(255)))),
   workflowJson: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(100_000)))),
+  /** Kept only when the next state is paused, failed, or cancelled. */
+  stopReason: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(2000)))),
 });
 const ApprovalRequest = Schema.Struct({
   runId: Schema.String,
@@ -200,6 +204,7 @@ const make = Effect.gen(function* () {
         approval_base_ref AS "approvalBaseRef",
         base_ref AS "baseRef",
         workflow_json AS "workflowJson",
+        stop_reason AS "stopReason",
         approved_by AS "approvedBy",
         approved_at AS "approvedAt",
         created_at AS "createdAt",
@@ -236,6 +241,7 @@ const make = Effect.gen(function* () {
         approval_base_ref AS "approvalBaseRef",
         base_ref AS "baseRef",
         workflow_json AS "workflowJson",
+        stop_reason AS "stopReason",
         approved_by AS "approvedBy",
         approved_at AS "approvedAt",
         created_at AS "createdAt",
@@ -267,6 +273,7 @@ const make = Effect.gen(function* () {
         approval_base_ref AS "approvalBaseRef",
         base_ref AS "baseRef",
         workflow_json AS "workflowJson",
+        stop_reason AS "stopReason",
         approved_by AS "approvedBy",
         approved_at AS "approvedAt",
         created_at AS "createdAt",
@@ -319,6 +326,7 @@ const make = Effect.gen(function* () {
         approval_base_ref AS "approvalBaseRef",
         base_ref AS "baseRef",
         workflow_json AS "workflowJson",
+        stop_reason AS "stopReason",
         approved_by AS "approvedBy",
         approved_at AS "approvedAt",
         created_at AS "createdAt",
@@ -349,6 +357,7 @@ const make = Effect.gen(function* () {
         approval_base_ref AS "approvalBaseRef",
         base_ref AS "baseRef",
         workflow_json AS "workflowJson",
+        stop_reason AS "stopReason",
         approved_by AS "approvedBy",
         approved_at AS "approvedAt",
         created_at AS "createdAt",
@@ -383,6 +392,7 @@ const make = Effect.gen(function* () {
         approval_base_ref AS "approvalBaseRef",
         base_ref AS "baseRef",
         workflow_json AS "workflowJson",
+        stop_reason AS "stopReason",
         approved_by AS "approvedBy",
         approved_at AS "approvedAt",
         created_at AS "createdAt",
@@ -410,6 +420,7 @@ const make = Effect.gen(function* () {
       approvalBaseRef,
       baseRef,
       workflowJson,
+      stopReason,
     }) => sql`
       UPDATE linear_autopilot_runs
       SET state = ${nextState},
@@ -443,6 +454,10 @@ const make = Effect.gen(function* () {
             ELSE base_ref
           END,
           workflow_json = COALESCE(${workflowJson ?? null}, workflow_json),
+          stop_reason = CASE
+            WHEN ${nextState} IN ('paused', 'failed', 'cancelled') THEN ${stopReason ?? null}
+            ELSE NULL
+          END,
           approved_by = CASE WHEN ${nextState} IN ('queued', 'planning') THEN NULL ELSE approved_by END,
           approved_at = CASE WHEN ${nextState} IN ('queued', 'planning') THEN NULL ELSE approved_at END
       WHERE run_id = ${runId} AND revision = ${expectedRevision}

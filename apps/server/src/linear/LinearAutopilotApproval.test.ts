@@ -161,10 +161,12 @@ it.effect("pauses a rejected review without moving the Linear issue to approval"
         needsHumanApprovalStateId: "state-needs-approval",
         reviewedAt: now,
         reviewerApproved: false,
+        rejectionReason: "Revise budget is used up.",
       }),
       "review_rejected",
     );
     assert.equal((yield* runs.getById(runId))?.state, "paused");
+    assert.equal((yield* runs.getById(runId))?.stopReason, "Revise budget is used up.");
     assert.equal(setup.updates.length, 0);
   }).pipe(Effect.provide(setup.layer));
 });

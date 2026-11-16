@@ -1,8 +1,10 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  defaultLinearAutopilotWorkflow,
   ProjectId,
   ProviderInstanceId,
+  type LinearAutopilotWorkflow as LinearAutopilotWorkflowDefinition,
   type ModelSelection,
   type Project,
 } from "@t3tools/contracts";
@@ -84,6 +86,7 @@ const harness = (
     readonly defaultBranch: string | null;
     readonly remoteBranches: ReadonlyArray<string>;
   } = { defaultBranch: "main", remoteBranches: ["main"] },
+  defaultWorkflow?: LinearAutopilotWorkflowDefinition,
 ) => {
   const launches: Array<LinearAutopilotPhaseLaunch.LinearAutopilotReadOnlyLaunchInput> = [];
   const implementationLaunches: Array<LinearAutopilotPhaseLaunch.LinearAutopilotImplementationLaunchInput> =
@@ -103,6 +106,7 @@ const harness = (
         readyStateIds: ["state-ready"],
         triggerLabelIds: ["label-agent"],
         projectMappings: { "linear-project": projectId },
+        ...(defaultWorkflow === undefined ? {} : { defaultWorkflow }),
       },
     }),
     Layer.mock(LinearAutopilotRun.LinearAutopilotRun)({
@@ -303,6 +307,47 @@ it.effect("launches planning once from the durable eligible outbox", () => {
       deferred: 0,
       discarded: 0,
     });
+  }).pipe(Effect.provide(setup.layer));
+});
+
+it.effect("plans with the configured default workflow when the project has none", () => {
+  const configuredPlanner: ModelSelection = {
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "gpt-6-sol",
+    options: [{ id: "reasoningEffort", value: "high" }],
+  };
+  const configured: LinearAutopilotWorkflowDefinition = {
+    ...defaultLinearAutopilotWorkflow,
+    id: "team-default",
+    label: "Team default",
+    nodes: defaultLinearAutopilotWorkflow.nodes.map((node) =>
+      node.kind === "plan" ? { ...node, persona: { modelSelection: configuredPlanner } } : node,
+    ),
+  };
+  const setup = harness(modelSelection, "queue", undefined, undefined, configured);
+  return Effect.gen(function* () {
+    const intake = yield* LinearAutopilotIntake.LinearAutopilotIntakeRepository;
+    yield* intake.ingest({
+      eventId: null,
+      workspaceId: "workspace-1",
+      issueId: "issue-default-workflow",
+      identifier: "OME-224",
+      title: "Configured default",
+      url: "https://linear.app/ome/issue/OME-224",
+      description: "Use the configured default",
+      projectId,
+      sourceUpdatedAt: DateTime.formatIso(now),
+      observedAt: DateTime.formatIso(now),
+    });
+    const dispatcher = yield* LinearAutopilotDispatcher.LinearAutopilotDispatcher;
+    yield* dispatcher.dispatchPending(10);
+    assert.deepStrictEqual(
+      setup.launches.map((launch) => launch.modelSelection),
+      [configuredPlanner],
+    );
+    const runs = yield* LinearAutopilotRuns.LinearAutopilotRunRepository;
+    const [run] = yield* runs.listRecoverable(10);
+    assert.include(run?.workflowJson ?? "", '"id":"team-default"');
   }).pipe(Effect.provide(setup.layer));
 });
 

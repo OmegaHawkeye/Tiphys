@@ -35,9 +35,7 @@ const harness = (
   } = {},
 ) => {
   const reviewLaunches: Array<LinearAutopilotPhaseLaunch.LinearAutopilotReadOnlyLaunchInput> = [];
-  const approvalRequests: Array<
-    LinearAutopilotApproval.LinearAutopilotApprovalRequest & { readonly reviewerApproved: boolean }
-  > = [];
+  const approvalRequests: Array<LinearAutopilotApproval.LinearAutopilotReviewedPlan> = [];
   const linearUpdates: Array<{ readonly issueId: string; readonly stateId: string }> = [];
   const followUps: Array<LinearAutopilotPhaseLaunch.LinearAutopilotFollowUpInput> = [];
   const dependencies = Layer.mergeAll(
@@ -360,6 +358,7 @@ it.effect.each([
     assert.equal(result.reviewsLaunched, 0);
     const run = yield* (yield* LinearAutopilotRuns.LinearAutopilotRunRepository).getById(runId);
     assert.equal(run?.state, "paused");
+    assert.include(run?.stopReason ?? "", blocked.reason);
     assert.deepStrictEqual(setup.linearUpdates, [
       { issueId: "issue-1", stateId: "blocked-state-1" },
     ]);
@@ -404,6 +403,24 @@ it.effect("sends only an explicit approve verdict to the exact human approval ga
   }).pipe(Effect.provide(setup.layer));
 });
 
+it.effect("pauses with a reason when the review has no verdict line", () => {
+  const setup = harness();
+  return Effect.gen(function* () {
+    const runId = yield* seedRun("reviewing");
+    yield* seedAttempt(runId, "planning", "Implementation plan");
+    yield* seedAttempt(runId, "review", "Looks fine to me, ship it.");
+
+    const reconciler = yield* LinearAutopilotReconciler.LinearAutopilotReconciler;
+    const result = yield* reconciler.reconcile();
+
+    assert.equal(result.approvalsRequested, 0);
+    const run = yield* (yield* LinearAutopilotRuns.LinearAutopilotRunRepository).getById(runId);
+    assert.equal(run?.state, "paused");
+    assert.include(run?.stopReason ?? "", "VERDICT: APPROVE or VERDICT: REVISE");
+    assert.equal(setup.linearUpdates.at(-1)?.stateId, "blocked-state-1");
+  }).pipe(Effect.provide(setup.layer));
+});
+
 it.effect("takes the default workflow's revise edge and launches a fresh planning attempt", () => {
   const execution = LinearAutopilotWorkflow.advanceLinearAutopilotWorkflow(
     LinearAutopilotWorkflow.startLinearAutopilotWorkflow(LinearAutopilotWorkflow.defaultWorkflow),
@@ -433,6 +450,32 @@ it.effect("takes the default workflow's revise edge and launches a fresh plannin
     );
     assert.equal(storedExecution.nodeId, "plan");
     assert.deepStrictEqual(Object.values(storedExecution.traversals), [1]);
+  }).pipe(Effect.provide(setup.layer));
+});
+
+it.effect("blocks the ticket with a reason once the revise budget is used up", () => {
+  let execution = LinearAutopilotWorkflow.startLinearAutopilotWorkflow(
+    LinearAutopilotWorkflow.defaultWorkflow,
+  );
+  for (const outcome of ["done", "revise", "done", "revise", "done"] as const) {
+    execution = LinearAutopilotWorkflow.advanceLinearAutopilotWorkflow(execution, outcome).state;
+  }
+  const setup = harness();
+  return Effect.gen(function* () {
+    const runId = yield* seedRun(
+      "reviewing",
+      LinearAutopilotWorkflow.encodeLinearAutopilotWorkflowExecution(execution),
+    );
+    yield* seedAttempt(runId, "planning", "Third plan");
+    yield* seedAttempt(runId, "review", "VERDICT: REVISE\nStill missing recovery coverage.");
+
+    const reconciler = yield* LinearAutopilotReconciler.LinearAutopilotReconciler;
+    yield* reconciler.reconcile();
+
+    assert.equal(setup.reviewLaunches.length, 0);
+    assert.equal(setup.approvalRequests[0]?.reviewerApproved, false);
+    assert.include(setup.approvalRequests[0]?.rejectionReason ?? "", "revise budget is used up");
+    assert.equal(setup.linearUpdates.at(-1)?.stateId, "blocked-state-1");
   }).pipe(Effect.provide(setup.layer));
 });
 
@@ -711,7 +754,9 @@ it.effect("blocks delivery when the thread has no linked pull request", () => {
     const reconciler = yield* LinearAutopilotReconciler.LinearAutopilotReconciler;
     yield* reconciler.reconcile();
     const runs = yield* LinearAutopilotRuns.LinearAutopilotRunRepository;
-    assert.equal((yield* runs.getById(runId))?.state, "paused");
+    const run = yield* runs.getById(runId);
+    assert.equal(run?.state, "paused");
+    assert.equal(run?.stopReason, "Delivery finished without a linked pull request.");
     assert.equal(setup.linearUpdates.at(-1)?.stateId, "blocked-state-1");
   }).pipe(Effect.provide(setup.layer));
 });

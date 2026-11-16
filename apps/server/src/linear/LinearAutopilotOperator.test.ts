@@ -179,6 +179,7 @@ it.effect("lists a project's runs with their pinned cursor and cancels the runni
     assert.equal(listed?.state, "planning");
     assert.equal(listed?.workflow?.nodeId, "plan");
     assert.equal(listed?.threadId, "thread-plan");
+    assert.isNull(listed?.stopReason);
 
     assert.isFalse(
       yield* operator.cancelRun({ runId: run.runId, expectedRevision: 0, cancelledBy: "me" }),
@@ -187,6 +188,7 @@ it.effect("lists a project's runs with their pinned cursor and cancels the runni
       yield* operator.cancelRun({ runId: run.runId, expectedRevision: 1, cancelledBy: "me" }),
     );
     assert.equal((yield* runs.getById(run.runId))?.state, "cancelled");
+    assert.equal((yield* operator.listRuns(projectId, 20))[0]?.stopReason, "Run cancelled by me.");
     assert.equal(
       (yield* attempts.getLatest({ runId: run.runId, phase: "planning" }))?.status,
       "failed",

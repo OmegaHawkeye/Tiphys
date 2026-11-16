@@ -10,7 +10,9 @@ import {
   removeNode,
   routeTargets,
   setRoute,
+  unusableModelWarnings,
   updateNode,
+  workflowToStore,
 } from "./workflowEditor.logic";
 
 const planner = createModelSelection(ProviderInstanceId.make("claude"), "claude-opus-5-5");
@@ -70,5 +72,61 @@ describe("removeNode", () => {
       { x: 300, y: 20 },
     );
     expect(removeNode(moved, "merge").layout).toEqual({ end: { x: 300, y: 20 } });
+  });
+});
+
+describe("unusableModelWarnings", () => {
+  const codex = { instanceId: "codex", displayName: "Codex", enabled: true, isAvailable: true };
+  const claude = {
+    instanceId: "claudeAgent",
+    displayName: "Claude",
+    enabled: true,
+    isAvailable: true,
+  };
+
+  it("accepts the built-in workflow when both of its providers are usable", () => {
+    expect(unusableModelWarnings(defaultLinearAutopilotWorkflow, [codex, claude])).toEqual([]);
+  });
+
+  it("names the review phase when its provider is turned off or missing", () => {
+    expect(
+      unusableModelWarnings(defaultLinearAutopilotWorkflow, [codex, { ...claude, enabled: false }]),
+    ).toEqual([
+      {
+        nodeId: "review",
+        message: "Review runs on Claude, which is turned off in this environment.",
+      },
+    ]);
+    expect(unusableModelWarnings(defaultLinearAutopilotWorkflow, [codex])).toEqual([
+      {
+        nodeId: "review",
+        message: 'Review runs on provider "claudeAgent", which is not set up in this environment.',
+      },
+    ]);
+  });
+
+  it("stays quiet until the environment's providers have loaded", () => {
+    expect(unusableModelWarnings(defaultLinearAutopilotWorkflow, [])).toEqual([]);
+  });
+
+  it("flags every phase on a provider that is not available right now", () => {
+    const warnings = unusableModelWarnings(defaultLinearAutopilotWorkflow, [
+      { ...codex, isAvailable: false },
+      claude,
+    ]);
+    expect(warnings.map((warning) => warning.nodeId)).toEqual(["plan", "implement"]);
+  });
+});
+
+describe("workflowToStore", () => {
+  it("stores nothing when a scope keeps the workflow it inherits", () => {
+    const inherited = customizeWorkflow();
+    expect(workflowToStore(structuredClone(inherited), inherited)).toBeNull();
+  });
+
+  it("stores the built-in explicitly when the inherited default is custom", () => {
+    expect(workflowToStore(defaultLinearAutopilotWorkflow, customizeWorkflow())).toBe(
+      defaultLinearAutopilotWorkflow,
+    );
   });
 });

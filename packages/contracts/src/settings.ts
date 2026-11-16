@@ -1212,6 +1212,8 @@ export const LinearAutopilotSettings = Schema.Struct({
   workflows: Schema.Record(ProjectId, LinearAutopilotWorkflow).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  /** Replaces the built-in workflow for every project without a workflow of its own. */
+  defaultWorkflow: Schema.optionalKey(LinearAutopilotWorkflow),
   clientId: TrimmedString.pipe(secretSetting, Schema.withDecodingDefault(Effect.succeed(""))),
   clientSecret: TrimmedString.pipe(secretSetting, Schema.withDecodingDefault(Effect.succeed(""))),
   githubIssueTriggerLabel: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
