@@ -1,4 +1,4 @@
-import type { ModelSelection } from "@t3tools/contracts";
+import type { ModelSelection, ProjectId } from "@t3tools/contracts";
 import { createModelSelection, formatModelSlugName } from "@t3tools/shared/model";
 
 import { getCustomModelOptionsByInstance } from "../../../modelSelection";
@@ -10,6 +10,7 @@ import { getTriggerDisplayModelName } from "../../chat/providerIconUtils";
 import { useSettingsScope } from "../../settings/SettingsScopeContext";
 import { useScopedModelDisabledReason } from "../../settings/useScopedModelAvailability";
 import { useScopedSettings } from "../../settings/useScopedSettings";
+import type { WorkflowProviderStatus } from "./workflowEditor.logic";
 
 function useScopedProviders() {
   const { environment } = useSettingsScope();
@@ -19,6 +20,14 @@ function useScopedProviders() {
       ? providersByEnvironment.get(environment.environmentId)
       : undefined) ?? EMPTY_SERVER_PROVIDERS
   );
+}
+
+/** Whether each provider instance can run a phase, as a project in this environment sees it. */
+export function useWorkflowProviderStatuses(
+  projectId: ProjectId | null,
+): ReadonlyArray<WorkflowProviderStatus> {
+  const settings = useScopedSettings();
+  return providerInstanceEntriesFor(useScopedProviders(), settings, projectId);
 }
 
 /** Labels a phase's model the way the composer does, falling back to a readable slug. */

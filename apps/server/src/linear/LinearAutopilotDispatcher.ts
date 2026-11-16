@@ -11,6 +11,7 @@ import type { PersistenceSqlError } from "../persistence/Errors.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchTypes from "../orchestration-v2/ThreadLaunchService.ts";
 import { autopilotSourceMode, type ServerSettingsError } from "@t3tools/contracts";
+import { resolveLinearAutopilotWorkflow } from "@t3tools/shared/linearAutopilotWorkflow";
 
 import * as ProjectService from "../project/ProjectService.ts";
 import * as LinearAutopilotIntake from "../persistence/LinearAutopilotIntake.ts";
@@ -188,9 +189,10 @@ const make = Effect.gen(function* () {
           deferred += 1;
           continue;
         }
-        const workflow =
-          currentSettings.linearAutopilot.workflows[candidate.projectId] ??
-          LinearAutopilotWorkflow.defaultWorkflow;
+        const workflow = resolveLinearAutopilotWorkflow(
+          currentSettings.linearAutopilot,
+          candidate.projectId,
+        );
         const workflowExecution = yield* LinearAutopilotWorkflow.effect(() =>
           LinearAutopilotWorkflow.startLinearAutopilotWorkflow(workflow),
         );

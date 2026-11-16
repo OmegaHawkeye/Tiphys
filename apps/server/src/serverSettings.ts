@@ -231,14 +231,21 @@ function ensureAutopilotWorkflowsValid(
   settings: ServerSettings,
   settingsPath: string,
 ): Effect.Effect<ServerSettings, ServerSettingsError> {
-  for (const [projectId, workflow] of Object.entries(settings.linearAutopilot.workflows)) {
+  const { workflows, defaultWorkflow } = settings.linearAutopilot;
+  const labelled = [
+    ...Object.entries(workflows).map(
+      ([projectId, workflow]) => [`workflow for project ${projectId}`, workflow] as const,
+    ),
+    ...(defaultWorkflow === undefined ? [] : [["default workflow", defaultWorkflow] as const]),
+  ];
+  for (const [label, workflow] of labelled) {
     const [issue] = linearAutopilotWorkflowIssues(workflow);
     if (issue !== undefined) {
       return Effect.fail(
         new ServerSettingsError({
           settingsPath,
           operation: "validate-autopilot-workflow",
-          detail: `workflow for project ${projectId}: ${issue.message}`,
+          detail: `${label}: ${issue.message}`,
         }),
       );
     }

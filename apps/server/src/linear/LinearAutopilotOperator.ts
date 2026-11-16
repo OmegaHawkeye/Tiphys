@@ -196,6 +196,7 @@ const make = Effect.gen(function* () {
                 ? null
                 : Option.getOrNull(decodePinnedWorkflow(run.workflowJson)),
             threadId: attempt?.threadId ?? run.threadId,
+            stopReason: run.stopReason,
             updatedAt: DateTime.formatIso(run.updatedAt),
           };
         }),
@@ -215,6 +216,7 @@ const make = Effect.gen(function* () {
         expectedRevision: input.expectedRevision,
         nextState: "cancelled",
         updatedAt: yield* DateTime.now,
+        stopReason: `Run cancelled by ${input.cancelledBy}.`,
       });
       if (!cancelled || attempt === null || !isActiveAttempt(attempt)) return cancelled;
       yield* attempts.recordResult({

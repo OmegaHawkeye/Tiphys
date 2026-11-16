@@ -7,7 +7,12 @@ import {
 } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
 import * as Effect from "effect/Effect";
-import { ExternalLinkIcon, MessageSquareIcon, RotateCcwIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  ExternalLinkIcon,
+  MessageSquareIcon,
+  RotateCcwIcon,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { PrimaryEnvironmentHttpClient } from "../../../environments/primary/httpClient";
@@ -16,6 +21,7 @@ import { cn } from "../../../lib/utils";
 import { runPrimaryHttp } from "../../../lib/runtime";
 import { usePrimaryEnvironmentId } from "../../../state/environments";
 import { buildThreadRouteParams } from "../../../threadRoutes";
+import { Alert, AlertDescription, AlertTitle } from "../../ui/alert";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
 import { RefreshIcon } from "../../ui/refresh-icon";
@@ -157,6 +163,11 @@ export function WorkflowRunList({
                 <span className="w-20 shrink-0 font-medium">{run.identifier ?? run.source}</span>
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">
                   {run.title ?? "Untitled ticket"}
+                  {run.stopReason !== null && run.state === "paused" ? (
+                    <span className="block truncate text-xs text-warning-foreground">
+                      {run.stopReason}
+                    </span>
+                  ) : null}
                 </span>
                 <Badge variant={stateVariant(run.state)}>{STATE_LABEL[run.state]}</Badge>
                 <time
@@ -238,6 +249,23 @@ export function WorkflowRunDetails({
         </div>
         <p className="text-sm text-muted-foreground">{run.title ?? "Untitled ticket"}</p>
       </div>
+      {run.stopReason !== null ? (
+        <Alert
+          variant={
+            run.state === "paused" ? "warning" : run.state === "failed" ? "error" : "default"
+          }
+        >
+          {run.state === "cancelled" ? null : <AlertTriangleIcon />}
+          <AlertTitle>
+            {run.state === "paused"
+              ? "Why it stopped"
+              : run.state === "cancelled"
+                ? "Cancelled"
+                : "Why it failed"}
+          </AlertTitle>
+          <AlertDescription>{run.stopReason}</AlertDescription>
+        </Alert>
+      ) : null}
       <p className="text-sm text-muted-foreground">
         {run.state === "queued"
           ? "Waiting to start planning. Autopilot picks up queued runs every 5 minutes."

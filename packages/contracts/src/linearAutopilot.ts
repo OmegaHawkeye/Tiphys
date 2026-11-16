@@ -97,6 +97,8 @@ export const LinearAutopilotRunSummary = Schema.Struct({
   workflow: Schema.NullOr(LinearAutopilotWorkflowExecution),
   /** Thread of the newest phase attempt, for jumping to the agent's work. */
   threadId: Schema.NullOr(Schema.String),
+  /** Why the run paused, failed, or was cancelled; null while it is active or delivered. */
+  stopReason: Schema.NullOr(Schema.String),
   updatedAt: Schema.String,
 });
 export type LinearAutopilotRunSummary = typeof LinearAutopilotRunSummary.Type;

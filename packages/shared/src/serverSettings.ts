@@ -468,6 +468,8 @@ export function applyServerSettingsPatch(
     };
   }
   const next = deepMerge(current, patchForMerge);
+  // The default workflow is replaced whole too, so an absent key in a whole patch clears it.
+  const { defaultWorkflow: _mergedDefaultWorkflow, ...mergedAutopilot } = next.linearAutopilot;
   const nextWithReplacementsBase = {
     ...next,
     favorites,
@@ -596,7 +598,10 @@ export function applyServerSettingsPatch(
     ...(patch.linearAutopilot !== undefined
       ? {
           linearAutopilot: {
-            ...next.linearAutopilot,
+            ...mergedAutopilot,
+            ...(patch.linearAutopilot.defaultWorkflow !== undefined
+              ? { defaultWorkflow: patch.linearAutopilot.defaultWorkflow }
+              : {}),
             ...(patch.linearAutopilot.projectMappings !== undefined
               ? { projectMappings: patch.linearAutopilot.projectMappings }
               : {}),
