@@ -30,7 +30,7 @@ import * as LinearAutopilotWorkflow from "./LinearAutopilotWorkflow.ts";
 import type { LinearAutopilotSettings, ServerSettingsError } from "@t3tools/contracts";
 
 const APPROVAL_POLICY_VERSION = "human-review-v1";
-const MAX_PHASE_SUMMARY_LENGTH = 4000;
+const MAX_PHASE_SUMMARY_LENGTH = 20_000;
 const isMissingProjection = Schema.is(ProjectionStore.ProjectionStoreThreadNotFoundError);
 
 export interface LinearAutopilotReconcileResult {
@@ -68,22 +68,59 @@ const latestRun = <A extends { readonly ordinal: number }>(runs: ReadonlyArray<A
     null,
   );
 
+const latestRunText = (
+  projection: OrchestrationV2ThreadProjection,
+  runId: string,
+): string | null => {
+  const latestByUpdate = <T extends { readonly updatedAt: DateTime.Utc }>(
+    items: ReadonlyArray<T>,
+  ) =>
+    items.reduce<T | null>(
+      (latest, candidate) =>
+        latest === null ||
+        DateTime.toEpochMillis(candidate.updatedAt) > DateTime.toEpochMillis(latest.updatedAt)
+          ? candidate
+          : latest,
+      null,
+    );
+  // Plan mode delivers the plan as a proposed_plan item; the chat message is
+  // only a preamble, so the plan wins whenever the run produced one.
+  const plan = latestByUpdate(
+    projection.turnItems.flatMap((item) =>
+      item.type === "proposed_plan" && item.runId === runId && item.markdown.trim().length > 0
+        ? [item]
+        : [],
+    ),
+  );
+  if (plan !== null) return plan.markdown.trim().slice(0, MAX_PHASE_SUMMARY_LENGTH);
+  const message = latestByUpdate(
+    projection.messages.filter(
+      (candidate) =>
+        candidate.role === "assistant" &&
+        candidate.runId === runId &&
+        candidate.text.trim().length > 0,
+    ),
+  );
+  return message?.text.trim().slice(0, MAX_PHASE_SUMMARY_LENGTH) ?? null;
+};
+
 const completedAssistantText = (projection: OrchestrationV2ThreadProjection): string | null => {
   const run = latestRun(projection.runs);
   if (run === null || run.status !== "completed") return null;
-  const messages = projection.messages.filter(
-    (message) =>
-      message.role === "assistant" && message.runId === run.id && message.text.trim().length > 0,
-  );
-  const message = messages.reduce<(typeof messages)[number] | null>(
-    (latest, candidate) =>
-      latest === null ||
-      DateTime.toEpochMillis(candidate.updatedAt) > DateTime.toEpochMillis(latest.updatedAt)
-        ? candidate
-        : latest,
-    null,
-  );
-  return message?.text.trim().slice(0, MAX_PHASE_SUMMARY_LENGTH) ?? null;
+  return latestRunText(projection, run.id);
+};
+
+const USAGE_LIMIT_PATTERN = /usage limit|hit your .*limit|rate limit|quota/iu;
+
+/** Explains why a phase agent stopped, using its last message when it names a cause. */
+const failedPhaseReason = (phase: string, status: string, lastMessage: string | null): string => {
+  const detail = lastMessage?.split("\n")[0]?.trim().slice(0, 300) ?? "";
+  if (detail.length > 0 && USAGE_LIMIT_PATTERN.test(detail)) {
+    return `The ${phase} agent hit the provider's usage limit: "${detail}". Restart the run once the limit resets.`;
+  }
+  return detail.length > 0
+    ? `The ${phase} agent stopped with status ${status}. Its last message: "${detail}"`
+    : `The ${phase} agent stopped with status ${status}. Open its thread to see why.`;
 };
 
 const isTerminalFailure = (status: string) =>
@@ -337,7 +374,7 @@ const make = Effect.gen(function* () {
               run.state === "delivering") &&
             projection.turnItems.some(
               (item) =>
-                item.type === "approval_request" &&
+                (item.type === "approval_request" || item.type === "user_input_request") &&
                 (item.status === "pending" || item.status === "waiting"),
             )
           ) {
@@ -407,7 +444,11 @@ const make = Effect.gen(function* () {
             } else {
               yield* pauseRun(
                 run,
-                `The ${phase} agent stopped with status ${projectionRun.status}. Open its thread to see why.`,
+                failedPhaseReason(
+                  phase,
+                  projectionRun.status,
+                  latestRunText(projection, projectionRun.id),
+                ),
               );
               continue;
             }

@@ -16,6 +16,7 @@ import Fork008 from "./ForkMigrations/008_LinearAutopilotRunBaseRef.ts";
 import Fork009 from "./ForkMigrations/009_AutopilotTicketSources.ts";
 import Fork010 from "./ForkMigrations/010_LinearAutopilotWorkflowSnapshot.ts";
 import Fork011 from "./ForkMigrations/011_LinearAutopilotRunStopReason.ts";
+import Fork012 from "./ForkMigrations/012_LinearAutopilotLongPhaseSummaries.ts";
 
 const forkMigrations = [
   Fork001,
@@ -29,6 +30,7 @@ const forkMigrations = [
   Fork009,
   Fork010,
   Fork011,
+  Fork012,
 ];
 
 const ledger = (table: string) =>

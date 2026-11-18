@@ -180,6 +180,12 @@ it.effect("lists a project's runs with their pinned cursor and cancels the runni
     assert.equal(listed?.workflow?.nodeId, "plan");
     assert.equal(listed?.threadId, "thread-plan");
     assert.isNull(listed?.stopReason);
+    assert.equal(listed?.projectId, projectId);
+    const active = yield* operator.listActiveRuns(50);
+    assert.deepStrictEqual(
+      active.map((summary) => [summary.identifier, summary.projectId]),
+      [["OME-240", projectId]],
+    );
 
     assert.isFalse(
       yield* operator.cancelRun({ runId: run.runId, expectedRevision: 0, cancelledBy: "me" }),
@@ -189,6 +195,7 @@ it.effect("lists a project's runs with their pinned cursor and cancels the runni
     );
     assert.equal((yield* runs.getById(run.runId))?.state, "cancelled");
     assert.equal((yield* operator.listRuns(projectId, 20))[0]?.stopReason, "Run cancelled by me.");
+    assert.deepStrictEqual(yield* operator.listActiveRuns(50), []);
     assert.equal(
       (yield* attempts.getLatest({ runId: run.runId, phase: "planning" }))?.status,
       "failed",

@@ -875,6 +875,13 @@ class EnvironmentLinearAutopilotHttpApi extends HttpApiGroup.make("linearAutopil
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
+    HttpApiEndpoint.get("listActiveRuns", "/api/linear-autopilot/runs/active", {
+      headers: OptionalBearerHeaders,
+      success: LinearAutopilotRunSummaries,
+      error: [EnvironmentAuthInvalidError, EnvironmentScopeRequiredError, EnvironmentInternalError],
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
     HttpApiEndpoint.post("cancelRun", "/api/linear-autopilot/runs/cancel", {
       headers: OptionalBearerHeaders,
       payload: LinearAutopilotCancelRunRequest,

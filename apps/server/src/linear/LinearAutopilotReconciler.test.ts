@@ -321,6 +321,105 @@ it.effect("records a completed plan and launches an independent read-only review
   }).pipe(Effect.provide(setup.layer));
 });
 
+it.effect("sends the planner's full proposed plan to review, not its opening message", () => {
+  // Codex plan mode puts the plan in a proposed_plan item; its only chat
+  // message is a one-line preamble. Real plans also run past 4,000 characters.
+  const plan = `# Plan\n\n${"- step\n".repeat(900)}`;
+  const setup = harness({
+    projection: {
+      thread: { modelSelection: plannerModel },
+      runs: [{ ordinal: 1, status: "completed", id: "provider-run-1" }],
+      messages: [
+        {
+          role: "assistant",
+          runId: "provider-run-1",
+          text: "I'll inspect the repo and keep this read-only.",
+          updatedAt: now,
+        },
+      ],
+      turnItems: [
+        {
+          type: "proposed_plan",
+          id: "plan-item",
+          runId: "provider-run-1",
+          status: "completed",
+          markdown: plan,
+          streaming: false,
+          updatedAt: now,
+        },
+      ],
+    },
+  });
+  return Effect.gen(function* () {
+    const runId = yield* seedRun("planning");
+    yield* seedRunningAttempt(runId, "planning");
+    const reconciler = yield* LinearAutopilotReconciler.LinearAutopilotReconciler;
+    const result = yield* reconciler.reconcile();
+    assert.equal(result.reviewsLaunched, 1, JSON.stringify(result));
+    assert.isAbove(plan.length, 4000);
+    assert.equal(setup.reviewLaunches[0]?.reviewContext, plan.trim());
+    const attempts = yield* LinearAutopilotPhaseAttempts.LinearAutopilotPhaseAttemptRepository;
+    assert.equal((yield* attempts.getLatest({ runId, phase: "planning" }))?.summary, plan.trim());
+  }).pipe(Effect.provide(setup.layer));
+});
+
+it.effect("moves a planner question to Needs Human Approval in Linear", () => {
+  const setup = harness({
+    projection: {
+      thread: { modelSelection: plannerModel },
+      runs: [{ ordinal: 1, status: "running", id: "planning-provider-run" }],
+      messages: [],
+      turnItems: [
+        {
+          type: "user_input_request",
+          id: "question",
+          status: "pending",
+          requestId: "provider-request",
+          questions: [],
+        },
+      ],
+    },
+  });
+  return Effect.gen(function* () {
+    const runId = yield* seedRun("planning");
+    yield* seedRunningAttempt(runId, "planning");
+    const reconciler = yield* LinearAutopilotReconciler.LinearAutopilotReconciler;
+    const result = yield* reconciler.reconcile();
+    assert.equal(result.deferred, 1);
+    assert.deepStrictEqual(setup.linearUpdates, [
+      { issueId: "issue-1", stateId: "approval-state-1" },
+    ]);
+  }).pipe(Effect.provide(setup.layer));
+});
+
+it.effect("names the usage limit when an agent stops because the provider limit was hit", () => {
+  const setup = harness({
+    projection: {
+      thread: { modelSelection: plannerModel },
+      runs: [{ ordinal: 1, status: "failed", id: "review-provider-run" }],
+      messages: [
+        {
+          role: "assistant",
+          runId: "review-provider-run",
+          text: "You've hit your 5-hour limit · resets 10:30pm (Europe/Vienna)",
+          updatedAt: now,
+        },
+      ],
+      turnItems: [],
+    },
+  });
+  return Effect.gen(function* () {
+    const runId = yield* seedRun("reviewing");
+    yield* seedRunningAttempt(runId, "review");
+    const reconciler = yield* LinearAutopilotReconciler.LinearAutopilotReconciler;
+    yield* reconciler.reconcile();
+    const run = yield* (yield* LinearAutopilotRuns.LinearAutopilotRunRepository).getById(runId);
+    assert.equal(run?.state, "paused");
+    assert.include(run?.stopReason ?? "", "usage limit");
+    assert.include(run?.stopReason ?? "", "resets 10:30pm");
+  }).pipe(Effect.provide(setup.layer));
+});
+
 it.effect(
   "launches review when the reviewer shares the planner's instance but differs in model",
   () => {
