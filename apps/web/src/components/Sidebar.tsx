@@ -213,6 +213,7 @@ import {
   type SidebarListItem,
   type SidebarSection,
   resolveSidebarRowThreadId,
+  resolveSidebarThreadStatus,
 } from "./Sidebar.logic";
 import {
   createSidebarCollisionDetection,
@@ -272,6 +273,8 @@ import {
   SidebarSectionHeader,
   SidebarSectionPlaceholder,
 } from "./sidebar/SidebarListMarkers";
+import { ActiveAutopilotRow, useActiveAutopilotRuns } from "./sidebar/ActiveAutopilots";
+import { sortActiveAutopilots } from "./sidebar/activeAutopilots.logic";
 
 function sameSidebarProviderEntries(
   left: ReadonlyMap<string, SidebarProviderEntry>,
@@ -330,6 +333,7 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
 const WORKING_SHELF_EXPANDED_KEY = "t3code:sidebar:working-expanded";
+const AUTOPILOTS_SHELF_EXPANDED_KEY = "t3code:sidebar:autopilots-expanded";
 
 const inboxReturns = createInboxReturnTracker();
 
@@ -475,6 +479,11 @@ function useSidebarThreads(input: {
     false,
     Schema.Boolean,
   );
+  const [autopilotsShelfExpanded, setAutopilotsShelfExpanded] = useLocalStorage(
+    AUTOPILOTS_SHELF_EXPANDED_KEY,
+    true,
+    Schema.Boolean,
+  );
   // Shared with the old per-project sidebar, so folders keep their open state.
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
@@ -600,6 +609,8 @@ function useSidebarThreads(input: {
     toggleSnoozedShelf: () => setSnoozedShelfExpanded((value) => !value),
     workingShelfExpanded,
     toggleWorkingShelf: () => setWorkingShelfExpanded((value) => !value),
+    autopilotsShelfExpanded,
+    toggleAutopilotsShelf: () => setAutopilotsShelfExpanded((value) => !value),
     projectFolders,
     toggleProjectFolder: (group: SidebarProjectSnapshot) => {
       const keys = sidebarFolderExpansionKeys(group);
@@ -1117,6 +1128,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           ),
         );
   const threads = useQuietThreadShells();
+  const activeAutopilotRuns = useActiveAutopilotRuns();
+  const activeAutopilots = sortActiveAutopilots(activeAutopilotRuns, (run) => {
+    const thread =
+      run.threadId === null
+        ? undefined
+        : threads.find(
+            (candidate) =>
+              candidate.environmentId === primaryEnvironmentId && candidate.id === run.threadId,
+          );
+    return thread === undefined ? null : resolveSidebarThreadStatus(thread);
+  });
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
@@ -1328,6 +1350,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     toggleSnoozedShelf,
     workingShelfExpanded,
     toggleWorkingShelf,
+    autopilotsShelfExpanded,
+    toggleAutopilotsShelf,
     projectFolders,
     toggleProjectFolder,
     renderedSettledThreads,
@@ -1948,6 +1972,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     const activeRows = rowsOf(activeThreads, "active");
     items.push({ kind: "marker", marker: "active-placeholder" });
     items.push(...activeRows);
+    if (activeAutopilots.length > 0) {
+      items.push({ kind: "marker", marker: "autopilots-header" });
+    }
     if (workingThreads.length > 0) {
       items.push({ kind: "marker", marker: "working-header" });
       items.push(...rowsOf(visibleWorkingThreads, "working"));
@@ -3506,12 +3533,38 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               />,
                             );
                             break;
+                          case "autopilots-header":
+                            items.push(
+                              <SidebarSectionHeader
+                                key="autopilots-shelf-header"
+                                marker="autopilots-header"
+                                className="mt-auto"
+                                label="Active Autopilots"
+                                count={activeAutopilots.length}
+                                toggle={{
+                                  expanded: autopilotsShelfExpanded,
+                                  onToggle: toggleAutopilotsShelf,
+                                }}
+                              />,
+                            );
+                            if (autopilotsShelfExpanded) {
+                              for (const entry of activeAutopilots) {
+                                items.push(
+                                  <ActiveAutopilotRow
+                                    key={`autopilot:${entry.run.runId}`}
+                                    entry={entry}
+                                    environmentId={primaryEnvironmentId}
+                                  />,
+                                );
+                              }
+                            }
+                            break;
                           case "working-header":
                             items.push(
                               <SidebarSectionHeader
                                 key="working-shelf-header"
                                 marker="working-header"
-                                className="mt-auto"
+                                className={cn(activeAutopilots.length === 0 && "mt-auto")}
                                 label="Working"
                                 count={workingThreads.length}
                                 toggle={{
@@ -3526,7 +3579,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               <SidebarSectionHeader
                                 key="snoozed-shelf-header"
                                 marker="snoozed-header"
-                                className={cn(workingThreads.length === 0 && "mt-auto")}
+                                className={cn(
+                                  activeAutopilots.length + workingThreads.length === 0 &&
+                                    "mt-auto",
+                                )}
                                 label="Snoozed"
                                 count={snoozedThreads.length}
                                 toggle={{
@@ -3542,7 +3598,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 key="settled-shelf-header"
                                 marker="settled-header"
                                 className={cn(
-                                  workingThreads.length + snoozedThreads.length === 0 && "mt-auto",
+                                  activeAutopilots.length +
+                                    workingThreads.length +
+                                    snoozedThreads.length ===
+                                    0 && "mt-auto",
                                 )}
                                 label="Settled"
                                 count={settledCount}

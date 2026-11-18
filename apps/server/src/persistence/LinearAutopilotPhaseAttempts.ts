@@ -57,7 +57,7 @@ const ResultRequest = Schema.Struct({
   status: Schema.Literals(["succeeded", "failed", "unknown"]),
   finishedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   threadId: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(255)))),
-  summary: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(4000)))),
+  summary: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(20_000)))),
 });
 const MarkRunningRequest = Schema.Struct({
   attemptId: Schema.String,

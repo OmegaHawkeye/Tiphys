@@ -198,6 +198,16 @@ export const layer = HttpApiBuilder.group(
         }),
       )
       .handle(
+        "listActiveRuns",
+        Effect.fn("environment.linearAutopilot.listActiveRuns")(function* (args) {
+          yield* annotateEnvironmentRequest(args.endpoint.name);
+          yield* requireEnvironmentScope(AuthOrchestrationReadScope);
+          return yield* operator
+            .listActiveRuns(50)
+            .pipe(Effect.catch((cause) => failEnvironmentInternal("internal_error", cause)));
+        }),
+      )
+      .handle(
         "cancelRun",
         Effect.fn("environment.linearAutopilot.cancelRun")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);

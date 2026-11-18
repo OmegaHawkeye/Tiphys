@@ -56,6 +56,13 @@ export class LinearAutopilotOperator extends Context.Service<
       ReadonlyArray<LinearAutopilotRunSummary>,
       PersistenceErrors.PersistenceSqlError
     >;
+    /** Every run that has not finished, across all projects, for the sidebar's autopilot shelf. */
+    readonly listActiveRuns: (
+      limit: number,
+    ) => Effect.Effect<
+      ReadonlyArray<LinearAutopilotRunSummary>,
+      PersistenceErrors.PersistenceSqlError
+    >;
     /**
      * Cancels a run at the revision the caller saw and interrupts the phase agent still working
      * on it. Returns false when the run moved on or has already finished.
@@ -172,36 +179,42 @@ const make = Effect.gen(function* () {
       }),
   );
 
+  const summarize = Effect.fn("LinearAutopilotOperator.summarize")(function* (
+    run: LinearAutopilotRuns.LinearAutopilotRun,
+  ) {
+    const [issue, attempt] = yield* Effect.all([
+      intake.getIssueContext({ workspaceId: run.workspaceId, issueId: run.issueId }),
+      currentAttempt(run),
+    ]);
+    return {
+      runId: run.runId,
+      revision: run.revision,
+      source: run.source,
+      state: run.state,
+      projectId: run.projectId,
+      identifier: issue?.identifier ?? null,
+      title: issue?.title ?? null,
+      url: issue?.url ?? null,
+      workflow:
+        run.workflowJson === null ? null : Option.getOrNull(decodePinnedWorkflow(run.workflowJson)),
+      threadId: attempt?.threadId ?? run.threadId,
+      stopReason: run.stopReason,
+      updatedAt: DateTime.formatIso(run.updatedAt),
+    } satisfies LinearAutopilotRunSummary;
+  });
+
   const listRuns: LinearAutopilotOperator["Service"]["listRuns"] = Effect.fn(
     "LinearAutopilotOperator.listRuns",
   )((projectId, limit) =>
-    Effect.gen(function* () {
-      const recent = yield* runs.listRecentForProject({ projectId, limit });
-      return yield* Effect.forEach(recent, (run) =>
-        Effect.gen(function* () {
-          const [issue, attempt] = yield* Effect.all([
-            intake.getIssueContext({ workspaceId: run.workspaceId, issueId: run.issueId }),
-            currentAttempt(run),
-          ]);
-          return {
-            runId: run.runId,
-            revision: run.revision,
-            source: run.source,
-            state: run.state,
-            identifier: issue?.identifier ?? null,
-            title: issue?.title ?? null,
-            url: issue?.url ?? null,
-            workflow:
-              run.workflowJson === null
-                ? null
-                : Option.getOrNull(decodePinnedWorkflow(run.workflowJson)),
-            threadId: attempt?.threadId ?? run.threadId,
-            stopReason: run.stopReason,
-            updatedAt: DateTime.formatIso(run.updatedAt),
-          };
-        }),
-      );
-    }),
+    runs
+      .listRecentForProject({ projectId, limit })
+      .pipe(Effect.flatMap((recent) => Effect.forEach(recent, summarize))),
+  );
+
+  const listActiveRuns: LinearAutopilotOperator["Service"]["listActiveRuns"] = Effect.fn(
+    "LinearAutopilotOperator.listActiveRuns",
+  )((limit) =>
+    runs.listRecoverable(limit).pipe(Effect.flatMap((active) => Effect.forEach(active, summarize))),
   );
 
   const cancelRun: LinearAutopilotOperator["Service"]["cancelRun"] = Effect.fn(
@@ -294,6 +307,7 @@ const make = Effect.gen(function* () {
     listPendingApprovals,
     approve: approval.approve,
     listRuns,
+    listActiveRuns,
     cancelRun,
     restartRun,
   });

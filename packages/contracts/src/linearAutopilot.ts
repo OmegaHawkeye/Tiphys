@@ -90,6 +90,8 @@ export const LinearAutopilotRunSummary = Schema.Struct({
   revision: Schema.Int,
   source: AutopilotTicketSource,
   state: LinearAutopilotRunState,
+  /** The T3 project the run works in; null until dispatch picks one. */
+  projectId: Schema.NullOr(ProjectId),
   identifier: Schema.NullOr(Schema.String),
   title: Schema.NullOr(Schema.String),
   url: Schema.NullOr(Schema.String),

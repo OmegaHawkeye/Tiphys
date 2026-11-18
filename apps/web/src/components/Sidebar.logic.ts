@@ -215,6 +215,7 @@ export type SidebarListMarker =
   | "active-placeholder"
   | "settled-placeholder"
   | "pinned-divider"
+  | "autopilots-header"
   | "working-header"
   | "snoozed-header"
   | "settled-header";
@@ -237,7 +238,9 @@ function sectionAtSidebarSlot(items: readonly SidebarListItem[], index: number):
     const item = items[i]!;
     if (item.kind !== "marker") continue;
     if (item.marker === "pinned-divider") section = "active";
-    else if (item.marker === "working-header") section = "working";
+    // Autopilot rows are not draggable threads, so treat the shelf like Working: no drops.
+    else if (item.marker === "autopilots-header" || item.marker === "working-header")
+      section = "working";
     else if (item.marker === "snoozed-header") section = "snoozed";
     else if (item.marker === "settled-header") section = "settled";
   }
@@ -269,6 +272,7 @@ export function resolveSidebarDropTarget(
     if (item.kind === "marker") {
       if (item.marker === "pinned-divider") currentSection = "active";
       else if (
+        item.marker === "autopilots-header" ||
         item.marker === "working-header" ||
         item.marker === "snoozed-header" ||
         item.marker === "settled-header"

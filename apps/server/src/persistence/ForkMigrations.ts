@@ -15,6 +15,7 @@ import Fork008 from "./ForkMigrations/008_LinearAutopilotRunBaseRef.ts";
 import Fork009 from "./ForkMigrations/009_AutopilotTicketSources.ts";
 import Fork010 from "./ForkMigrations/010_LinearAutopilotWorkflowSnapshot.ts";
 import Fork011 from "./ForkMigrations/011_LinearAutopilotRunStopReason.ts";
+import Fork012 from "./ForkMigrations/012_LinearAutopilotLongPhaseSummaries.ts";
 
 // Fork migrations use their own ledger: upstream skips every id below its highest recorded
 // one, so a fork id in the shared ledger hides the upstream migration that later takes it
@@ -33,6 +34,7 @@ const forkMigrationEntries = [
   [9, "AutopilotTicketSources", Fork009],
   [10, "LinearAutopilotWorkflowSnapshot", Fork010],
   [11, "LinearAutopilotRunStopReason", Fork011],
+  [12, "LinearAutopilotLongPhaseSummaries", Fork012],
 ] as const;
 
 export const forkMigrationManifest = forkMigrationEntries.map(([id, name]) => [id, name] as const);
