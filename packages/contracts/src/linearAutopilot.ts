@@ -99,6 +99,8 @@ export const LinearAutopilotRunSummary = Schema.Struct({
   workflow: Schema.NullOr(LinearAutopilotWorkflowExecution),
   /** Thread of the newest phase attempt, for jumping to the agent's work. */
   threadId: Schema.NullOr(Schema.String),
+  /** Every thread the run's phases launched, oldest first; the sidebar groups them under the run. */
+  threadIds: Schema.Array(Schema.String),
   /** Why the run paused, failed, or was cancelled; null while it is active or delivered. */
   stopReason: Schema.NullOr(Schema.String),
   updatedAt: Schema.String,

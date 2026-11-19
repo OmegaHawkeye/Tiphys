@@ -95,6 +95,10 @@ export class LinearAutopilotPhaseAttemptRepository extends Context.Service<
     readonly getLatest: (
       input: typeof LatestAttemptRequest.Type,
     ) => Effect.Effect<LinearAutopilotPhaseAttempt | null, PersistenceSqlErrorType>;
+    /** Every thread the run's attempts launched, oldest first. */
+    readonly listThreadIds: (
+      runId: string,
+    ) => Effect.Effect<ReadonlyArray<string>, PersistenceSqlErrorType>;
   }
 >()("t3/persistence/LinearAutopilotPhaseAttempts/LinearAutopilotPhaseAttemptRepository") {}
 
@@ -187,6 +191,18 @@ const make = Effect.gen(function* () {
     `,
   });
 
+  const findThreadIds = SqlSchema.findAll({
+    Request: Schema.Struct({ runId: Schema.String }),
+    Result: Schema.Struct({ threadId: Schema.String }),
+    execute: ({ runId }) => sql`
+      SELECT thread_id AS "threadId"
+      FROM linear_autopilot_phase_attempts
+      WHERE run_id = ${runId} AND thread_id IS NOT NULL
+      GROUP BY thread_id
+      ORDER BY MIN(started_at), MIN(attempt_id)
+    `,
+  });
+
   return LinearAutopilotPhaseAttemptRepository.of({
     begin: Effect.fn("LinearAutopilotPhaseAttemptRepository.begin")((input) =>
       sql
@@ -263,6 +279,12 @@ const make = Effect.gen(function* () {
       findLatest(input).pipe(
         Effect.map((row) => (row._tag === "Some" ? row.value : null)),
         Effect.mapError(toPersistenceSqlError("LinearAutopilotPhaseAttempts.getLatest:query")),
+      ),
+    ),
+    listThreadIds: Effect.fn("LinearAutopilotPhaseAttemptRepository.listThreadIds")((runId) =>
+      findThreadIds({ runId }).pipe(
+        Effect.map((rows) => rows.map((row) => row.threadId)),
+        Effect.mapError(toPersistenceSqlError("LinearAutopilotPhaseAttempts.listThreadIds:query")),
       ),
     ),
   });

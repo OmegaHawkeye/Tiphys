@@ -1,4 +1,10 @@
-import type { LinearAutopilotRunState, LinearAutopilotRunSummary } from "@t3tools/contracts";
+import { threadKey } from "@t3tools/client-runtime/state/entities";
+import {
+  ThreadId,
+  type EnvironmentId,
+  type LinearAutopilotRunState,
+  type LinearAutopilotRunSummary,
+} from "@t3tools/contracts";
 
 import type { SidebarThreadStatus } from "../Sidebar.logic";
 
@@ -69,4 +75,24 @@ export function sortActiveAutopilots(
         Number(right.status.needsYou) - Number(left.status.needsYou) ||
         right.run.updatedAt.localeCompare(left.run.updatedAt),
     );
+}
+
+/**
+ * Adds every phase thread of an active run to the keys the thread lists skip, so each run
+ * shows once, under its own card, instead of as a Plan and Review thread per attempt.
+ */
+export function withAutopilotThreadKeys(
+  runs: ReadonlyArray<LinearAutopilotRunSummary>,
+  environmentId: EnvironmentId | null,
+  shownUnderParent: ReadonlySet<string>,
+): ReadonlySet<string> {
+  if (environmentId === null || runs.every((run) => run.threadIds.length === 0)) {
+    return shownUnderParent;
+  }
+  const keys = new Set(shownUnderParent);
+  for (const run of runs) {
+    for (const id of run.threadIds)
+      keys.add(threadKey({ environmentId, threadId: ThreadId.make(id) }));
+  }
+  return keys;
 }

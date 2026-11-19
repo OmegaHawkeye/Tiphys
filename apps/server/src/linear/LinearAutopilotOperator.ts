@@ -182,9 +182,10 @@ const make = Effect.gen(function* () {
   const summarize = Effect.fn("LinearAutopilotOperator.summarize")(function* (
     run: LinearAutopilotRuns.LinearAutopilotRun,
   ) {
-    const [issue, attempt] = yield* Effect.all([
+    const [issue, attempt, threadIds] = yield* Effect.all([
       intake.getIssueContext({ workspaceId: run.workspaceId, issueId: run.issueId }),
       currentAttempt(run),
+      attempts.listThreadIds(run.runId),
     ]);
     return {
       runId: run.runId,
@@ -198,6 +199,7 @@ const make = Effect.gen(function* () {
       workflow:
         run.workflowJson === null ? null : Option.getOrNull(decodePinnedWorkflow(run.workflowJson)),
       threadId: attempt?.threadId ?? run.threadId,
+      threadIds,
       stopReason: run.stopReason,
       updatedAt: DateTime.formatIso(run.updatedAt),
     } satisfies LinearAutopilotRunSummary;

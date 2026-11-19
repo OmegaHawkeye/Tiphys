@@ -38,6 +38,7 @@ const harness = (
   const approvalRequests: Array<LinearAutopilotApproval.LinearAutopilotReviewedPlan> = [];
   const linearUpdates: Array<{ readonly issueId: string; readonly stateId: string }> = [];
   const followUps: Array<LinearAutopilotPhaseLaunch.LinearAutopilotFollowUpInput> = [];
+  const dispatched: Array<{ readonly type: string; readonly threadId?: string }> = [];
   const dependencies = Layer.mergeAll(
     LinearAutopilotIntake.layer,
     LinearAutopilotRuns.layer,
@@ -57,6 +58,11 @@ const harness = (
       },
     }),
     Layer.mock(ThreadManagement.ThreadManagementService)({
+      dispatch: (command) =>
+        Effect.sync(() => {
+          dispatched.push(command);
+          return {} as never;
+        }),
       getThreadProjection: () =>
         options.projection !== undefined
           ? Effect.succeed(options.projection as never)
@@ -134,6 +140,7 @@ const harness = (
     approvalRequests,
     linearUpdates,
     followUps,
+    dispatched,
   };
 };
 
@@ -313,6 +320,10 @@ it.effect("records a completed plan and launches an independent read-only review
     assert.isDefined(defaultReviewerModel);
     assert.deepStrictEqual(setup.reviewLaunches[0]?.modelSelection, defaultReviewerModel);
     assert.equal(setup.reviewLaunches[0]?.reviewContext, "Implementation plan");
+    assert.deepStrictEqual(
+      setup.dispatched.map((command) => [command.type, command.threadId]),
+      [["thread.settle", "planning-thread"]],
+    );
     const attempts = yield* LinearAutopilotPhaseAttempts.LinearAutopilotPhaseAttemptRepository;
     assert.equal(
       (yield* attempts.getLatest({ runId, phase: "planning" }))?.summary,

@@ -237,7 +237,8 @@ function sectionAtSidebarSlot(items: readonly SidebarListItem[], index: number):
   for (let i = 0; i < index && i < items.length; i += 1) {
     const item = items[i]!;
     if (item.kind !== "marker") continue;
-    if (item.marker === "pinned-divider") section = "active";
+    if (item.marker === "pinned-header") section = "pinned";
+    else if (item.marker === "pinned-divider") section = "active";
     // Autopilot rows are not draggable threads, so treat the shelf like Working: no drops.
     else if (item.marker === "autopilots-header" || item.marker === "working-header")
       section = "working";
@@ -261,18 +262,23 @@ export function resolveSidebarDropTarget(
   const activeIndex = items.findIndex((item) => sidebarListItemId(item) === activeKey);
   const overIndex = items.findIndex((item) => sidebarListItemId(item) === overId);
   if (activeIndex === -1 || overIndex === -1 || items[activeIndex]?.kind !== "thread") return null;
+  if (items[overIndex]?.kind === "marker" && items[overIndex].marker === "autopilots-header")
+    return null;
   const moved = items.filter((_, index) => index !== activeIndex);
   moved.splice(overIndex, 0, items[activeIndex]!);
-  const section = sectionAtSidebarSlot(moved, overIndex);
+  const section =
+    items[overIndex]?.kind === "marker" && items[overIndex].marker === "pinned-header"
+      ? "pinned"
+      : sectionAtSidebarSlot(moved, overIndex);
   if (section === "working" || section === "snoozed") return null;
   const pinnedOrder: string[] = [];
   const activeOrder: string[] = [];
   let currentSection: SidebarSection = "pinned";
   for (const item of moved) {
     if (item.kind === "marker") {
-      if (item.marker === "pinned-divider") currentSection = "active";
+      if (item.marker === "pinned-header") currentSection = "pinned";
+      else if (item.marker === "pinned-divider") currentSection = "active";
       else if (
-        item.marker === "autopilots-header" ||
         item.marker === "working-header" ||
         item.marker === "snoozed-header" ||
         item.marker === "settled-header"

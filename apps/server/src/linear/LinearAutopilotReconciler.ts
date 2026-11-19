@@ -1,4 +1,4 @@
-import { ThreadId, type OrchestrationV2ThreadProjection } from "@t3tools/contracts";
+import { CommandId, ThreadId, type OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -405,8 +405,23 @@ const make = Effect.gen(function* () {
               deferred += 1;
               continue;
             }
+            const phaseThreadId = ThreadId.make(attempt.threadId);
             attempt = { ...attempt, status: "succeeded", summary };
             phasesCompleted += 1;
+            if (phase === "planning" || phase === "review") {
+              // A finished plan or review lives on under its run; leaving it active clutters the sidebar.
+              yield* threads
+                .dispatch({
+                  type: "thread.settle",
+                  commandId: CommandId.make(`${attempt.commandId}:settle`),
+                  threadId: phaseThreadId,
+                })
+                .pipe(
+                  Effect.catch((cause) =>
+                    Effect.logWarning("Could not settle finished autopilot phase thread", cause),
+                  ),
+                );
+            }
           } else {
             const summary = `Autopilot ${phase} run ended with status ${projectionRun.status}.`;
             const pullRequest =

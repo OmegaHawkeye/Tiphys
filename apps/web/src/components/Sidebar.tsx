@@ -274,7 +274,7 @@ import {
   SidebarSectionPlaceholder,
 } from "./sidebar/SidebarListMarkers";
 import { ActiveAutopilotRow, useActiveAutopilotRuns } from "./sidebar/ActiveAutopilots";
-import { sortActiveAutopilots } from "./sidebar/activeAutopilots.logic";
+import { sortActiveAutopilots, withAutopilotThreadKeys } from "./sidebar/activeAutopilots.logic";
 
 function sameSidebarProviderEntries(
   left: ReadonlyMap<string, SidebarProviderEntry>,
@@ -1129,16 +1129,32 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         );
   const threads = useQuietThreadShells();
   const activeAutopilotRuns = useActiveAutopilotRuns();
+  const autopilotThreadById =
+    activeAutopilotRuns.length === 0
+      ? null
+      : new Map<string, EnvironmentThreadShell>(
+          threads
+            .filter((thread) => thread.environmentId === primaryEnvironmentId)
+            .map((thread) => [thread.id, thread] as const),
+        );
   const activeAutopilots = sortActiveAutopilots(activeAutopilotRuns, (run) => {
-    const thread =
-      run.threadId === null
-        ? undefined
-        : threads.find(
-            (candidate) =>
-              candidate.environmentId === primaryEnvironmentId && candidate.id === run.threadId,
-          );
+    const thread = run.threadId === null ? undefined : autopilotThreadById?.get(run.threadId);
     return thread === undefined ? null : resolveSidebarThreadStatus(thread);
   });
+  const shownUnderParent = withAutopilotThreadKeys(
+    activeAutopilotRuns,
+    primaryEnvironmentId,
+    delegatedUnderParent,
+  );
+  const [expandedAutopilotRunIds, setExpandedAutopilotRunIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const toggleAutopilotRun = (runId: string) =>
+    setExpandedAutopilotRunIds((current) => {
+      const next = new Set(current);
+      if (!next.delete(runId)) next.add(runId);
+      return next;
+    });
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
@@ -1163,7 +1179,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     routeKey: routeRowThreadKey,
     isSearching: isSearchingThreads,
     scopedProjectKeys: chosenScopeProjectKeys,
-    delegatedUnderParent,
+    delegatedUnderParent: shownUnderParent,
     findThread: (key) => threads.find((candidate) => threadShellKey(candidate) === key),
   });
   const projectScopeKeys = revealWidensScope ? [] : chosenProjectScopeKeys;
@@ -1373,7 +1389,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     connectedEnvironmentIds,
     optimisticDrop,
     threads,
-    delegatedUnderParent,
+    delegatedUnderParent: shownUnderParent,
     routeRowThreadKey,
     folderGroups: boringSidebarEnabled
       ? scopedProjectGroups.length === 0
@@ -1958,6 +1974,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       !hasProjectFolders &&
       pinnedThreads.length +
         activeThreads.length +
+        activeAutopilots.length +
         workingThreads.length +
         snoozedThreads.length +
         settledCount ===
@@ -1965,16 +1982,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     ) {
       return [];
     }
-    const items: SidebarListItem[] = [{ kind: "marker", marker: "pinned-header" }];
+    const items: SidebarListItem[] = [];
+    if (activeAutopilots.length > 0) {
+      items.push({ kind: "marker", marker: "autopilots-header" });
+    }
+    items.push({ kind: "marker", marker: "pinned-header" });
     const pinnedRows = rowsOf(pinnedThreads, "pinned");
     items.push(...pinnedRows);
     items.push({ kind: "marker", marker: "pinned-divider" });
     const activeRows = rowsOf(activeThreads, "active");
     items.push({ kind: "marker", marker: "active-placeholder" });
     items.push(...activeRows);
-    if (activeAutopilots.length > 0) {
-      items.push({ kind: "marker", marker: "autopilots-header" });
-    }
     if (workingThreads.length > 0) {
       items.push({ kind: "marker", marker: "working-header" });
       items.push(...rowsOf(visibleWorkingThreads, "working"));
@@ -3538,7 +3556,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               <SidebarSectionHeader
                                 key="autopilots-shelf-header"
                                 marker="autopilots-header"
-                                className="mt-auto"
+                                className="mt-2"
                                 label="Active Autopilots"
                                 count={activeAutopilots.length}
                                 toggle={{
@@ -3549,13 +3567,41 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             );
                             if (autopilotsShelfExpanded) {
                               for (const entry of activeAutopilots) {
+                                const runThreads = entry.run.threadIds.flatMap((id) => {
+                                  const thread = autopilotThreadById?.get(id);
+                                  return thread === undefined || thread.archivedAt !== null
+                                    ? []
+                                    : [thread];
+                                });
+                                const current =
+                                  runThreads.find((thread) => thread.id === entry.run.threadId) ??
+                                  runThreads.at(-1);
+                                const earlier = runThreads.filter((thread) => thread !== current);
+                                const expanded = expandedAutopilotRunIds.has(entry.run.runId);
                                 items.push(
                                   <ActiveAutopilotRow
                                     key={`autopilot:${entry.run.runId}`}
                                     entry={entry}
-                                    environmentId={primaryEnvironmentId}
+                                    earlierThreadCount={earlier.length}
+                                    expanded={expanded}
+                                    onToggle={() => toggleAutopilotRun(entry.run.runId)}
                                   />,
                                 );
+                                if (current !== undefined) {
+                                  items.push(renderThreadRow(current, "working"));
+                                }
+                                if (expanded) {
+                                  for (const thread of earlier) {
+                                    items.push(
+                                      renderThreadRow(
+                                        thread,
+                                        thread.settledOverride === "settled"
+                                          ? "settled"
+                                          : "working",
+                                      ),
+                                    );
+                                  }
+                                }
                               }
                             }
                             break;
@@ -3564,7 +3610,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               <SidebarSectionHeader
                                 key="working-shelf-header"
                                 marker="working-header"
-                                className={cn(activeAutopilots.length === 0 && "mt-auto")}
+                                className="mt-auto"
                                 label="Working"
                                 count={workingThreads.length}
                                 toggle={{
@@ -3579,10 +3625,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               <SidebarSectionHeader
                                 key="snoozed-shelf-header"
                                 marker="snoozed-header"
-                                className={cn(
-                                  activeAutopilots.length + workingThreads.length === 0 &&
-                                    "mt-auto",
-                                )}
+                                className={cn(workingThreads.length === 0 && "mt-auto")}
                                 label="Snoozed"
                                 count={snoozedThreads.length}
                                 toggle={{
@@ -3598,10 +3641,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 key="settled-shelf-header"
                                 marker="settled-header"
                                 className={cn(
-                                  activeAutopilots.length +
-                                    workingThreads.length +
-                                    snoozedThreads.length ===
-                                    0 && "mt-auto",
+                                  workingThreads.length + snoozedThreads.length === 0 && "mt-auto",
                                 )}
                                 label="Settled"
                                 count={settledCount}

@@ -1,7 +1,12 @@
-import type { LinearAutopilotRunSummary } from "@t3tools/contracts";
+import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
+import { EnvironmentId, ThreadId, type LinearAutopilotRunSummary } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { activeAutopilotStatus, sortActiveAutopilots } from "./activeAutopilots.logic.ts";
+import {
+  activeAutopilotStatus,
+  sortActiveAutopilots,
+  withAutopilotThreadKeys,
+} from "./activeAutopilots.logic.ts";
 
 const run = (overrides: Partial<LinearAutopilotRunSummary>): LinearAutopilotRunSummary => ({
   runId: "run",
@@ -14,6 +19,7 @@ const run = (overrides: Partial<LinearAutopilotRunSummary>): LinearAutopilotRunS
   url: null,
   workflow: null,
   threadId: "thread",
+  threadIds: ["thread"],
   stopReason: null,
   updatedAt: "2026-11-18T08:00:00.000Z",
   ...overrides,
@@ -61,5 +67,24 @@ describe("sortActiveAutopilots", () => {
       () => "working",
     );
     expect(sorted.map((entry) => entry.run.runId)).toEqual(["paused", "new", "old"]);
+  });
+});
+
+describe("withAutopilotThreadKeys", () => {
+  it("lists every phase thread of an active run under the run, not in the thread lists", () => {
+    const environmentId = EnvironmentId.make("env");
+    const keys = withAutopilotThreadKeys(
+      [run({ threadIds: ["plan", "review"] })],
+      environmentId,
+      new Set(),
+    );
+    const lineage = (id: string) => ({
+      parentThreadId: null,
+      relationshipToParent: null,
+      rootThreadId: ThreadId.make(id),
+    });
+    const shown = (id: string) =>
+      isShownUnderParent({ environmentId, threadId: ThreadId.make(id) }, lineage(id), keys);
+    expect([shown("plan"), shown("review"), shown("other")]).toEqual([true, true, false]);
   });
 });
