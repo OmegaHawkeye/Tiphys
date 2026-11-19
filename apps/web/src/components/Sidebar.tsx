@@ -3582,15 +3582,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                   <ActiveAutopilotRow
                                     key={`autopilot:${entry.run.runId}`}
                                     entry={entry}
-                                    earlierThreadCount={earlier.length}
+                                    threadCount={runThreads.length}
                                     expanded={expanded}
                                     onToggle={() => toggleAutopilotRun(entry.run.runId)}
                                   />,
                                 );
-                                if (current !== undefined) {
-                                  items.push(renderThreadRow(current, "working"));
-                                }
                                 if (expanded) {
+                                  if (current !== undefined) {
+                                    items.push(renderThreadRow(current, "working"));
+                                  }
                                   for (const thread of earlier) {
                                     items.push(
                                       renderThreadRow(

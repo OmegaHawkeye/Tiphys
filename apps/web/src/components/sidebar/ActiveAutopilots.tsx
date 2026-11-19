@@ -46,18 +46,14 @@ export function useActiveAutopilotRuns(): ReadonlyArray<LinearAutopilotRunSummar
   return runs;
 }
 
-/**
- * A run's header: ticket, title, and phase. Its current thread renders below as a normal card;
- * the header folds the run's earlier phase threads (plans, reviews) in and out.
- */
 export function ActiveAutopilotRow(props: {
   entry: ActiveAutopilotEntry;
-  earlierThreadCount: number;
+  threadCount: number;
   expanded: boolean;
   onToggle: () => void;
 }) {
   const { run, status } = props.entry;
-  const foldable = props.earlierThreadCount > 0;
+  const foldable = props.threadCount > 0;
   const className = cn(
     "mx-0.5 flex h-7 w-[calc(100%-0.25rem)] items-center gap-2 rounded-md px-2 text-left text-xs outline-none",
     foldable &&
@@ -100,7 +96,7 @@ export function ActiveAutopilotRow(props: {
           </span>
           {foldable ? (
             <span className="flex shrink-0 items-center gap-0.5 text-muted-foreground tabular-nums">
-              +{props.earlierThreadCount}
+              +{props.threadCount}
               <ChevronRightIcon
                 aria-hidden
                 className={cn("size-3 transition-transform", props.expanded && "rotate-90")}
@@ -111,7 +107,7 @@ export function ActiveAutopilotRow(props: {
         <TooltipPopup side="right" className="max-w-80">
           {status.detail}
           {foldable
-            ? ` · ${props.earlierThreadCount} earlier ${props.earlierThreadCount === 1 ? "thread" : "threads"}`
+            ? ` · ${props.threadCount} ${props.threadCount === 1 ? "thread" : "threads"}`
             : ""}
         </TooltipPopup>
       </Tooltip>
